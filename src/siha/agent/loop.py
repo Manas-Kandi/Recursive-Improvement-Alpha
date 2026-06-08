@@ -1,6 +1,7 @@
 """ReAct agent loop: plan → act → observe"""
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Callable, List, Dict, Any, Optional
@@ -135,6 +136,12 @@ class AgentLoop:
                 full_content = "".join(content_parts)
                 tool_calls_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
 
+                # Fallback for models that don't support native tool_calls (e.g. Qwen via Ollama)
+                if not tool_calls_list:
+                    content_tool = self._try_parse_content_tool_call(full_content)
+                    if content_tool:
+                        tool_calls_list = [content_tool]
+
                 if tool_calls_list:
                     self._record_step(
                         StepType.tool_call,
@@ -255,6 +262,34 @@ class AgentLoop:
         except (json.JSONDecodeError, TypeError):
             return {}
 
+    @staticmethod
+    def _try_parse_content_tool_call(content: str) -> Optional[Dict[str, Any]]:
+        """Extract a tool call from raw content for models without native function calling.
+
+        Looks for JSON in the format:
+            {"tool": "TOOL_NAME", "arguments": {...}}
+        """
+        if not content:
+            return None
+        # Find the first JSON object in the content
+        match = re.search(r'\{[\s\S]*?"tool"[\s\S]*?\}', content)
+        if not match:
+            return None
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+        tool_name = data.get("tool") or data.get("name")
+        arguments = data.get("arguments") or data.get("args") or data.get("parameters", {})
+        if not tool_name or not isinstance(tool_name, str):
+            return None
+        # Convert to OpenAI-style tool call format so the rest of the loop works
+        return {
+            "id": f"call-{tool_name}-0",
+            "type": "function",
+            "function": {"name": tool_name, "arguments": json.dumps(arguments)},
+        }
+
     def _get_system_prompt(self) -> str:
         """Get the active system prompt from the DB, falling back to a default."""
         from siha.agent.prompts import get_active_prompt
@@ -263,11 +298,22 @@ class AgentLoop:
         prompt = get_active_prompt(PromptRole.system, harness_version_id=self.harness_version_id)
         if prompt:
             return prompt
+
+        tool_list = []
+        for name, tool in self.registry.tools.items():
+            tool_list.append(f"- {name}: {tool.description}")
+
         return (
-            "You are a helpful coding assistant. You can plan and execute code to "
-            "solve user requests. Break down problems into steps, write clear code, "
-            "and explain your reasoning. When you have completed the task, provide a "
-            "final answer without further tool calls."
+            "You are a helpful coding assistant with access to tools. "
+            "Think step by step. If a user just greets you or asks a simple "
+            "conversational question, reply naturally WITHOUT calling any tools. "
+            "Only use a tool when you genuinely need to perform an action "
+            "(run code, search the web, read a file, etc.).\n\n"
+            "Available tools:\n"
+            + "\n".join(tool_list)
+            + "\n\nWhen you need to use a tool, output EXACTLY one JSON object on its own line:\n"
+            '{"tool": "TOOL_NAME", "arguments": {"arg1": "value1"}}\n'
+            "Then wait for the result. When the task is complete, give a final answer."
         )
     
     def _record_step(self, step_type: StepType, content: Dict[str, Any], tokens: int, latency_ms: int):

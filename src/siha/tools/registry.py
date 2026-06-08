@@ -82,6 +82,11 @@ class ToolRegistry:
         """List all available tool names"""
         return list(self._builtin_tools.keys()) + list(self._db_tools.keys())
 
+    @property
+    def tools(self) -> Dict[str, Any]:
+        """Return a dict mapping tool names to tool instances."""
+        return {**self._builtin_tools, **self._db_tools}
+
     def to_openai_tools(self) -> List[Dict]:
         """Convert all tools to OpenAI tool-calling format"""
         tools = []
