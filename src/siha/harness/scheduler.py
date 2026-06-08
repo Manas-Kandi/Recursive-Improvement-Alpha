@@ -56,8 +56,6 @@ class Scheduler:
         """Analyze completed tasks that have not yet been analyzed."""
         from siha.portal.events import event_bus
 
-        # Collect unanalyzed task ids first to avoid holding the session open
-        # across LLM calls.
         with get_session() as session:
             tasks = session.query(Task).filter(
                 Task.status == TaskStatus.success,
@@ -66,9 +64,9 @@ class Scheduler:
             task_ids = [t.id for t in tasks]
 
         for task_id in task_ids:
+            critique = None
             try:
                 critique = self.analyzer.analyze_task(task_id)
-
                 for mutation_data in critique.get("proposed_mutations", []):
                     mutation = self.mutator.propose_mutation(mutation_data)
                     event_bus.publish("mutation_proposed", {"mutation_id": mutation.id})
@@ -76,10 +74,10 @@ class Scheduler:
                     if not settings.require_human_approval:
                         self.mutator.apply_mutation(mutation)
 
-                # Optionally generate a benchmark from a novel task.
                 self._maybe_generate_benchmark(task_id)
+            except Exception as e:
+                print(f"Analyzer error for task {task_id}: {e}")
             finally:
-                # Mark analyzed regardless of outcome to avoid reprocessing loops.
                 with get_session() as session:
                     task = session.get(Task, task_id)
                     if task:
@@ -95,45 +93,31 @@ class Scheduler:
             BenchmarkGenerator().generate_from_task(task_id)
         except Exception as e:
             print(f"Benchmark generation skipped: {e}")
-    
-    def _evaluate_pending_mutations(self):
-        """Evaluate pending mutations against benchmarks"""
-        with get_session() as session:
-            pending_mutations = session.query(Mutation).filter(
-                Mutation.status == MutationStatus.pending
-            ).all()
 
-            mutation_ids = [m.id for m in pending_mutations]
+    def _evaluate_pending_mutations(self):
+        """Evaluate candidate mutations against benchmarks and promote or rollback."""
+        with get_session() as session:
+            candidate_mutations = session.query(Mutation).filter(
+                Mutation.status == MutationStatus.candidate,
+            ).all()
+            mutation_ids = [m.id for m in candidate_mutations]
 
         for mutation_id in mutation_ids:
-            with get_session() as session:
-                mutation = session.get(Mutation, mutation_id)
-                if not mutation or mutation.status != MutationStatus.pending:
-                    continue
-
-            self.mutator.apply_mutation(mutation)
-            should_promote = self.evaluator.should_promote(mutation)
-
-            with get_session() as session:
-                mutation = session.get(Mutation, mutation_id)
-                if not mutation:
-                    continue
-                if should_promote:
-                    mutation.status = MutationStatus.active
-                    session.commit()
-                elif mutation.status != MutationStatus.reverted:
-                    should_reject = True
-                else:
-                    should_reject = False
-
-            if not should_promote and should_reject:
-                self.mutator.rollback_mutation(mutation)
+            try:
                 with get_session() as session:
                     mutation = session.get(Mutation, mutation_id)
-                    if mutation:
-                        mutation.status = MutationStatus.rejected
-                        session.commit()
-    
+                    if not mutation or mutation.status != MutationStatus.candidate:
+                        continue
+
+                should_promote = self.evaluator.should_promote(mutation)
+
+                if should_promote:
+                    self.mutator.promote_mutation(mutation)
+                else:
+                    self.mutator.rollback_mutation(mutation)
+            except Exception as e:
+                print(f"Evaluator error for mutation {mutation_id}: {e}")
+
     def trigger_improvement(self):
         """Manually trigger improvement cycle"""
         self._analyze_completed_tasks()

@@ -30,33 +30,16 @@ engine = get_engine()
 
 
 def init_db():
-    """Initialize database tables and apply lightweight migrations"""
-    from siha.models import Task, Step, Tool, ToolCall, Prompt, Strategy, Mutation, Benchmark, BenchmarkRun, HarnessVersion
-    SQLModel.metadata.create_all(engine)
-    _migrate()
+    """Initialize database tables via Alembic migrations."""
+    from alembic.config import Config
+    from alembic import command
 
-
-def _migrate():
-    """Apply additive column migrations for pre-existing SQLite databases."""
-    expected = {
-        "task": {
-            "final_answer": "TEXT",
-            "analyzed": "BOOLEAN DEFAULT 0",
-        },
-    }
-    with engine.connect() as conn:
-        for table, columns in expected.items():
-            existing = {
-                row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))
-            }
-            for column, ddl in columns.items():
-                if column not in existing:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-        conn.commit()
+    alembic_cfg = Config(Path(__file__).parent.parent.parent / "alembic.ini")
+    command.upgrade(alembic_cfg, "head")
 
 
 @contextmanager
 def get_session():
     """Context manager for database sessions"""
-    with Session(engine) as session:
+    with Session(engine, expire_on_commit=False) as session:
         yield session

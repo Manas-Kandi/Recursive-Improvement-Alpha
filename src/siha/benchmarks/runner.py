@@ -6,7 +6,9 @@ from siha.models import Benchmark, BenchmarkRun, HarnessVersion, BenchmarkOrigin
 from siha.agent.loop import AgentLoop
 from siha.config import settings
 import re
+import tempfile
 import time
+from pathlib import Path
 
 
 def seed_benchmarks():
@@ -119,18 +121,22 @@ class BenchmarkRunner:
     
     def run_benchmark(self, benchmark: Benchmark, harness_version_id: int) -> BenchmarkRun:
         """Run a single benchmark and record results"""
-        
+
         start_time = time.time()
-        
+
+        # Isolate each benchmark in its own workspace
+        workspace = Path(tempfile.mkdtemp(prefix=f"siha_bench_{benchmark.name}_"))
+
         # Run the task with low temperature for determinism
-        agent = AgentLoop()
+        agent = AgentLoop(harness_version_id=harness_version_id)
         agent.client.temperature = settings.benchmark_temperature
-        
+
         task = agent.run(
             benchmark.task_spec.get("prompt", ""),
-            sandbox_mode=benchmark.task_spec.get("sandbox", "local")
+            sandbox_mode=benchmark.task_spec.get("sandbox", "local"),
+            workspace_dir=workspace,
         )
-        
+
         duration_ms = int((time.time() - start_time) * 1000)
         
         # Score against assertions

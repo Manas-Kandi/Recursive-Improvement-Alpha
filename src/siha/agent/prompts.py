@@ -5,12 +5,27 @@ from siha.db import get_session
 from siha.models import Prompt, PromptRole
 
 
-def get_active_prompt(role: PromptRole) -> Optional[str]:
-    """Load the active prompt for a given role from the database"""
+def get_active_prompt(role: PromptRole, harness_version_id: Optional[int] = None) -> Optional[str]:
+    """Load the active prompt for a given role from the database.
+
+    If ``harness_version_id`` is provided, load from that version's prompt set
+    instead of globally active prompts.
+    """
+    from siha.models import HarnessVersion
+
     with get_session() as session:
+        if harness_version_id is not None:
+            version = session.get(HarnessVersion, harness_version_id)
+            if version and version.prompt_set:
+                prompt = session.query(Prompt).filter(
+                    Prompt.role == role,
+                    Prompt.id.in_(version.prompt_set),
+                ).first()
+                if prompt:
+                    return prompt.text
         prompt = session.query(Prompt).filter(
             Prompt.role == role,
-            Prompt.status == "active"
+            Prompt.status == "active",
         ).first()
         return prompt.text if prompt else None
 

@@ -15,13 +15,19 @@ from siha.portal.events import event_bus
 class AgentLoop:
     """ReAct-style agent loop with tool calling"""
 
-    def __init__(self, model: Optional[str] = None, provider: Optional[str] = None):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        harness_version_id: Optional[int] = None,
+    ):
         self.client = create_llm_client(model=model, provider=provider)
         self.step_count = 0
         self.task: Optional[Task] = None
+        self.harness_version_id = harness_version_id
         # Each loop gets its own registry so a per-task sandbox can be bound
         # without interfering with concurrent runs.
-        self.registry = ToolRegistry()
+        self.registry = ToolRegistry(harness_version_id=harness_version_id)
         self.sandbox = None
 
     def run(
@@ -47,6 +53,7 @@ class AgentLoop:
                 model=self.client.model,
                 status=TaskStatus.running,
                 sandbox_mode=sandbox_mode,
+                harness_version_id=self.harness_version_id,
             )
             session.add(self.task)
             session.commit()
@@ -247,7 +254,7 @@ class AgentLoop:
         from siha.agent.prompts import get_active_prompt
         from siha.models import PromptRole
 
-        prompt = get_active_prompt(PromptRole.system)
+        prompt = get_active_prompt(PromptRole.system, harness_version_id=self.harness_version_id)
         if prompt:
             return prompt
         return (

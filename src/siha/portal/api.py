@@ -228,38 +228,45 @@ def get_mutations(token: str = Depends(verify_auth)):
 
 @app.post("/mutations/{mutation_id}/approve")
 def approve_mutation(mutation_id: int, token: str = Depends(verify_auth)):
-    """Approve a pending mutation"""
+    """Approve a proposed mutation, applying it as a candidate version."""
     from siha.harness.mutator import Mutator
-    
+    from siha.models import MutationStatus
+
     with get_session() as session:
         mutation = session.get(Mutation, mutation_id)
         if not mutation:
             raise HTTPException(status_code=404, detail="Mutation not found")
-        
-        if mutation.status != "pending":
-            raise HTTPException(status_code=400, detail="Mutation not pending")
-        
+
+        if mutation.status not in (MutationStatus.proposed, MutationStatus.pending):
+            raise HTTPException(status_code=400, detail="Mutation is not in an approvable state")
+
         mutator = Mutator()
         mutator.apply_mutation(mutation)
-        
-        return {"status": "approved"}
+
+        return {"status": "candidate"}
 
 
 @app.post("/mutations/{mutation_id}/reject")
 def reject_mutation(mutation_id: int, token: str = Depends(verify_auth)):
-    """Reject a pending mutation"""
+    """Reject a proposed or candidate mutation."""
+    from siha.harness.mutator import Mutator
+    from siha.models import MutationStatus
+
     with get_session() as session:
         mutation = session.get(Mutation, mutation_id)
         if not mutation:
             raise HTTPException(status_code=404, detail="Mutation not found")
-        
-        if mutation.status != "pending":
-            raise HTTPException(status_code=400, detail="Mutation not pending")
-        
-        from siha.models import MutationStatus
-        mutation.status = MutationStatus.rejected
-        session.commit()
-        
+
+        if mutation.status not in (MutationStatus.proposed, MutationStatus.pending, MutationStatus.candidate):
+            raise HTTPException(status_code=400, detail="Mutation is not in a rejectable state")
+
+        if mutation.status == MutationStatus.candidate:
+            mutator = Mutator()
+            mutator.rollback_mutation(mutation)
+        else:
+            mutation.status = MutationStatus.rejected
+            session.commit()
+
         return {"status": "rejected"}
 
 

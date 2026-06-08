@@ -11,12 +11,10 @@ def test_sandbox_factory_local():
     assert isinstance(sandbox, LocalSandbox)
 
 
-def test_docker_falls_back_to_local_when_unavailable():
-    # On hosts without Docker, the factory must still return a usable sandbox.
-    sandbox = create_sandbox("docker")
-    result = sandbox.run("echo hi")
-    assert result.success
-    assert "hi" in result.stdout
+def test_docker_raises_when_unavailable():
+    # On hosts without Docker, the factory must raise a clear error.
+    with pytest.raises(RuntimeError, match="Docker is not available"):
+        create_sandbox("docker")
 
 
 def test_shared_sandbox_write_then_read():

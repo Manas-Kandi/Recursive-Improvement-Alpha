@@ -9,17 +9,16 @@ from siha.sandbox.local import LocalSandbox
 def create_sandbox(mode: str = "local", workspace_dir: Optional[Path] = None) -> Sandbox:
     """Factory that returns a sandbox for the requested mode.
 
-    Falls back to the local sandbox if Docker is requested but unavailable.
+    Raises RuntimeError if Docker is requested but unavailable.
     """
     if mode == "docker":
         from siha.sandbox.docker import DockerSandbox
 
-        if workspace_dir is not None:
-            return LocalSandbox(workspace_dir=workspace_dir)
-        if DockerSandbox.is_available():
-            return DockerSandbox()
-        # Graceful fallback so tasks still run on hosts without Docker.
-        return LocalSandbox()
+        if not DockerSandbox.is_available():
+            raise RuntimeError(
+                "Docker sandbox requested but Docker is not available on this host."
+            )
+        return DockerSandbox()
     return LocalSandbox(workspace_dir=workspace_dir)
 
 

@@ -26,6 +26,7 @@ class ToolKind(str, Enum):
 
 class ToolStatus(str, Enum):
     active = "active"
+    candidate = "candidate"
     deprecated = "deprecated"
 
 
@@ -56,10 +57,15 @@ class MutationKind(str, Enum):
 
 
 class MutationStatus(str, Enum):
+    proposed = "proposed"
     pending = "pending"
+    candidate = "candidate"
+    evaluating = "evaluating"
+    promoted = "promoted"
     active = "active"
     reverted = "reverted"
     rejected = "rejected"
+    rolled_back = "rolled_back"
 
 
 class BenchmarkOrigin(str, Enum):
@@ -78,7 +84,8 @@ class Task(SQLModel, table=True):
     error_summary: Optional[str] = None
     final_answer: Optional[str] = None
     analyzed: bool = Field(default=False)
-    
+    harness_version_id: Optional[int] = Field(default=None)
+
     steps: List["Step"] = Relationship(back_populates="task")
     tool_calls: List["ToolCall"] = Relationship(back_populates="task")
 
@@ -97,7 +104,7 @@ class Step(SQLModel, table=True):
 
 class Tool(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(unique=True, index=True)
+    name: str = Field(index=True)
     version: str = "1.0.0"
     description: str
     json_schema: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
@@ -142,12 +149,15 @@ class Strategy(SQLModel, table=True):
 class Mutation(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     kind: MutationKind
-    target_id: int
+    target_id: int = 0
+    target_name: Optional[str] = Field(default=None)
     before: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     after: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     rationale: str
-    status: MutationStatus = MutationStatus.pending
+    status: MutationStatus = MutationStatus.proposed
     benchmark_delta: Optional[float] = None
+    base_version_id: Optional[int] = Field(default=None)
+    candidate_version_id: Optional[int] = Field(default=None)
     created_ts: datetime = Field(default_factory=datetime.utcnow)
     decided_ts: Optional[datetime] = None
 
