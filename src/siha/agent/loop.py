@@ -266,29 +266,28 @@ class AgentLoop:
     def _try_parse_content_tool_call(content: str) -> Optional[Dict[str, Any]]:
         """Extract a tool call from raw content for models without native function calling.
 
-        Looks for JSON in the format:
+        Accepts both formats:
             {"tool": "TOOL_NAME", "arguments": {...}}
+            {"name": "TOOL_NAME", "arguments": {...}}
         """
         if not content:
             return None
-        # Find the first JSON object in the content
-        match = re.search(r'\{[\s\S]*?"tool"[\s\S]*?\}', content)
-        if not match:
-            return None
-        try:
-            data = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return None
-        tool_name = data.get("tool") or data.get("name")
-        arguments = data.get("arguments") or data.get("args") or data.get("parameters", {})
-        if not tool_name or not isinstance(tool_name, str):
-            return None
-        # Convert to OpenAI-style tool call format so the rest of the loop works
-        return {
-            "id": f"call-{tool_name}-0",
-            "type": "function",
-            "function": {"name": tool_name, "arguments": json.dumps(arguments)},
-        }
+        # Scan for JSON objects that look like tool calls (contain "tool"/"name" + "arguments")
+        for match in re.finditer(r'\{[\s\S]*?"(?:tool|name)"[\s\S]*?"arguments"[\s\S]*?\}', content):
+            try:
+                data = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                continue
+            tool_name = data.get("tool") or data.get("name")
+            arguments = data.get("arguments") or data.get("args") or data.get("parameters", {})
+            if not tool_name or not isinstance(tool_name, str):
+                continue
+            return {
+                "id": f"call-{tool_name}-0",
+                "type": "function",
+                "function": {"name": tool_name, "arguments": json.dumps(arguments)},
+            }
+        return None
 
     def _get_system_prompt(self) -> str:
         """Get the active system prompt from the DB, falling back to a default."""
@@ -304,16 +303,17 @@ class AgentLoop:
             tool_list.append(f"- {name}: {tool.description}")
 
         return (
-            "You are a helpful coding assistant with access to tools. "
-            "Think step by step. If a user just greets you or asks a simple "
-            "conversational question, reply naturally WITHOUT calling any tools. "
-            "Only use a tool when you genuinely need to perform an action "
-            "(run code, search the web, read a file, etc.).\n\n"
+            "You are a helpful coding assistant with access to tools.\n\n"
+            "RULES:\n"
+            "1. For greetings, chitchat, or simple questions, just reply in plain text.\n"
+            "   NEVER output JSON or call tools for these.\n"
+            "2. Only use a tool when the user explicitly asks you to DO something\n"
+            "   (run code, read a file, search the web, etc.).\n"
+            "3. When a tool IS needed, output EXACTLY one JSON object and nothing else:\n"
+            '   {"tool": "TOOL_NAME", "arguments": {"arg1": "value1"}}\n'
+            "4. After receiving a tool result, continue the task or give a final answer.\n\n"
             "Available tools:\n"
             + "\n".join(tool_list)
-            + "\n\nWhen you need to use a tool, output EXACTLY one JSON object on its own line:\n"
-            '{"tool": "TOOL_NAME", "arguments": {"arg1": "value1"}}\n'
-            "Then wait for the result. When the task is complete, give a final answer."
         )
     
     def _record_step(self, step_type: StepType, content: Dict[str, Any], tokens: int, latency_ms: int):

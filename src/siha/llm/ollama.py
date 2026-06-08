@@ -27,13 +27,15 @@ class OllamaClient(LLMProvider):
         max_tokens: Optional[int] = None,
         stream: bool = False
     ) -> ChatCompletion:
+        # NOTE: We deliberately do NOT pass `tools` to the Ollama OpenAI endpoint.
+        # Qwen models via this endpoint enter forced function-calling mode when
+        # `tools` is present, outputting JSON even for simple greetings.
+        # Tool calls are parsed from raw content by AgentLoop._try_parse_content_tool_call.
         params = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature if temperature is not None else self.temperature,
         }
-        if tools:
-            params["tools"] = tools
         if max_tokens:
             params["max_tokens"] = max_tokens
         if stream:
@@ -47,14 +49,13 @@ class OllamaClient(LLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None
     ) -> Iterator[ChatCompletionChunk]:
+        # See chat() note above — tools are NOT passed to avoid forced JSON output.
         params = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature if temperature is not None else self.temperature,
             "stream": True,
         }
-        if tools:
-            params["tools"] = tools
         if max_tokens:
             params["max_tokens"] = max_tokens
         return self.client.chat.completions.create(**params)
