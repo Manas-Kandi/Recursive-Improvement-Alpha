@@ -13,6 +13,7 @@ from siha.sandbox import create_sandbox
 from siha.portal.events import event_bus
 from siha.agent.router import IntentRouter
 from siha.agent.planner import TaskPlanner
+from siha.agent.action_mapper import ActionMapper
 
 
 class AgentLoop:
@@ -32,6 +33,7 @@ class AgentLoop:
         # without interfering with concurrent runs.
         self.registry = ToolRegistry(harness_version_id=harness_version_id)
         self.sandbox = None
+        self.working_memory: Dict[str, Any] = {}  # Tracks recent actions for context
 
     def run(
         self,
@@ -95,28 +97,40 @@ class AgentLoop:
             messages.extend(history)
         messages.append({"role": "user", "content": user_prompt})
 
-        # --- Planner pre-step ---
-        # Plan the first concrete tool call and execute it immediately.
-        # Injecting a completed tool turn means the main model starts from
-        # "tool already ran" rather than "should I do this?" — bypassing the
-        # model's tendency to say "I can't do that."
-        planner = TaskPlanner(provider=self.client.__class__.__name__.lower().replace("client", "") or None,
-                              model=self.client.model)
-        first_step = planner.plan_first_step(user_prompt, tools)
+        # --- Action Mapping + Planning ---
+        # Try deterministic templates FIRST (no LLM). If no template matches,
+        # fall back to the LLM planner. This makes the harness smart and
+        # removes decision-making burden from small models.
+        mapper = ActionMapper()
+        first_step = mapper.map(user_prompt)
+        source = "template"
+
+        if not first_step:
+            # Fall back to LLM planner for novel requests
+            planner = TaskPlanner(
+                provider=self.client.__class__.__name__.lower().replace("client", "") or None,
+                model=self.client.model,
+            )
+            first_step = planner.plan_first_step(user_prompt, tools)
+            source = "planned"
+
         if first_step:
             tool_name = first_step["function"]["name"]
             tool_args = self._parse_args(first_step["function"]["arguments"])
-            _emit("plan_step", {"tool": tool_name, "args": tool_args})
+            _emit("action_step", {"tool": tool_name, "args": tool_args, "source": source})
 
             exec_start = time.time()
             tool_result = self._execute_tool(tool_name, tool_args)
             tool_duration_ms = int((time.time() - exec_start) * 1000)
             self._record_tool_call(tool_name, tool_args, tool_result, tool_duration_ms)
 
+            # Update working memory with context
+            self._update_working_memory(tool_name, tool_args, tool_result)
+
             content = tool_result.output or tool_result.error or ""
             self._record_step(
                 StepType.tool_call,
-                {"tool_calls": [first_step], "planned": True},
+                {"tool_calls": [first_step], "source": source},
                 0,
                 tool_duration_ms,
             )
@@ -421,6 +435,8 @@ class AgentLoop:
                 "code, then explain your findings.\n"
             )
 
+        context = self._build_working_memory_context()
+
         return (
             "You are a helpful coding assistant with access to tools.\n\n"
             + intent_guidance
@@ -435,7 +451,8 @@ class AgentLoop:
             'WRONG: "Here is how you can create the file..."  (do NOT do this)\n'
             'RIGHT: {"tool": "write_file", "arguments": {"path": "hello.txt", "content": "Hello World"}}\n'
             "Then wait for the tool result and confirm completion.\n\n"
-            "Available tools:\n"
+            + (context + "\n\n" if context else "")
+            + "Available tools:\n"
             + "\n".join(tool_list)
         )
     
@@ -496,3 +513,36 @@ class AgentLoop:
             )
             session.add(tool_call)
             session.commit()
+
+    def _update_working_memory(self, tool_name: str, tool_args: Dict[str, Any], tool_result) -> None:
+        """Track recent actions so follow-up requests have context."""
+        if tool_name == "run_shell":
+            cmd = tool_args.get("command", "")
+            # Track directory creation
+            if cmd.startswith("mkdir"):
+                parts = cmd.split()
+                if len(parts) >= 2:
+                    self.working_memory["last_created_folder"] = parts[-1]
+            # Track file moves
+            elif cmd.startswith("mv"):
+                parts = cmd.split()
+                if len(parts) >= 3:
+                    self.working_memory["last_moved_src"] = parts[1]
+                    self.working_memory["last_moved_dst"] = parts[2]
+        elif tool_name == "write_file":
+            self.working_memory["last_written_file"] = tool_args.get("path", "")
+        elif tool_name == "read_file":
+            self.working_memory["last_read_file"] = tool_args.get("path", "")
+
+    def _build_working_memory_context(self) -> str:
+        """Format working memory into a context string for the system prompt."""
+        if not self.working_memory:
+            return ""
+        lines = ["\nRecent context:"]
+        if "last_created_folder" in self.working_memory:
+            lines.append(f'- Created folder: "{self.working_memory["last_created_folder"]}"')
+        if "last_written_file" in self.working_memory:
+            lines.append(f'- Created file: "{self.working_memory["last_written_file"]}"')
+        if "last_read_file" in self.working_memory:
+            lines.append(f'- Read file: "{self.working_memory["last_read_file"]}"')
+        return "\n".join(lines)
