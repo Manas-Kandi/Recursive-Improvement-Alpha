@@ -98,25 +98,27 @@ class AgentLoop:
         messages.append({"role": "user", "content": user_prompt})
 
         # --- Action Mapping + Planning ---
-        # Try deterministic templates FIRST (no LLM). If no template matches,
-        # fall back to the LLM planner. This makes the harness smart and
-        # removes decision-making burden from small models.
+        # Try deterministic templates FIRST (no LLM). Compound requests
+        # ("create folder X and write file Y") may yield multiple steps.
         mapper = ActionMapper()
-        first_step = mapper.map(user_prompt)
+        steps = mapper.map(user_prompt)
         source = "template"
 
-        if not first_step:
+        if not steps:
             # Fall back to LLM planner for novel requests
             planner = TaskPlanner(
                 provider=self.client.__class__.__name__.lower().replace("client", "") or None,
                 model=self.client.model,
             )
-            first_step = planner.plan_first_step(user_prompt, tools)
+            step = planner.plan_first_step(user_prompt, tools)
+            if step:
+                steps = [step]
             source = "planned"
 
-        if first_step:
-            tool_name = first_step["function"]["name"]
-            tool_args = self._parse_args(first_step["function"]["arguments"])
+        # Execute every planned step in sequence
+        for step in steps:
+            tool_name = step["function"]["name"]
+            tool_args = self._parse_args(step["function"]["arguments"])
             _emit("action_step", {"tool": tool_name, "args": tool_args, "source": source})
 
             exec_start = time.time()
@@ -124,13 +126,12 @@ class AgentLoop:
             tool_duration_ms = int((time.time() - exec_start) * 1000)
             self._record_tool_call(tool_name, tool_args, tool_result, tool_duration_ms)
 
-            # Update working memory with context
             self._update_working_memory(tool_name, tool_args, tool_result)
 
             content = tool_result.output or tool_result.error or ""
             self._record_step(
                 StepType.tool_call,
-                {"tool_calls": [first_step], "source": source},
+                {"tool_calls": [step], "source": source},
                 0,
                 tool_duration_ms,
             )
@@ -149,11 +150,11 @@ class AgentLoop:
             messages.append({
                 "role": "assistant",
                 "content": "",
-                "tool_calls": [first_step],
+                "tool_calls": [step],
             })
             messages.append({
                 "role": "tool",
-                "tool_call_id": first_step["id"],
+                "tool_call_id": step["id"],
                 "content": content[:settings.max_output_bytes],
             })
 

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 ACTION_TEMPLATES: List[Tuple[str, str, callable]] = [
     # File / directory creation
     (
-        r'(?:create|make)\s+(?:a\s+)?(?:new\s+)?folder\s+(?:called\s+|named\s+)?["\']?(\w+)["\']?',
+        r'(?:create|make)\s+(?:a\s+)?(?:new\s+)?folder\s+(?:called\s+|named\s+)?["\']?([\w\-/]+)["\']?',
         "run_shell",
         lambda m: {"command": f"mkdir -p {m.group(1)}"},
     ),
@@ -23,6 +23,12 @@ ACTION_TEMPLATES: List[Tuple[str, str, callable]] = [
         r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?file\s+(?:called\s+|named\s+)?["\']?([^"\']+)["\']?\s+with\s+(?:content\s+)?(.+)',
         "write_file",
         lambda m: {"path": m.group(1).strip(), "content": m.group(2).strip()},
+    ),
+    # Bare file creation without explicit content (harness generates placeholder)
+    (
+        r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?file\s+(?:called\s+|named\s+)?["\']?([^"\']+\.\w+)["\']?\b(?!\s+with)',
+        "write_file",
+        lambda m: {"path": m.group(1).strip(), "content": "# Generated file\n"},
     ),
     # Move / copy / rename
     (
@@ -78,25 +84,28 @@ ACTION_TEMPLATES: List[Tuple[str, str, callable]] = [
 
 
 class ActionMapper:
-    """Deterministic mapping from user request to tool call."""
+    """Deterministic mapping from user request to tool call(s)."""
 
-    def map(self, user_prompt: str) -> Optional[Dict[str, Any]]:
-        """Try to match user prompt against templates. Returns tool call dict or None."""
+    def map(self, user_prompt: str) -> List[Dict[str, Any]]:
+        """Scan for ALL matching actions in the prompt. Returns list of tool calls."""
         prompt_lower = user_prompt.lower()
+        steps: List[Dict[str, Any]] = []
+        idx = 0
 
         for pattern, tool_name, arg_builder in ACTION_TEMPLATES:
-            match = re.search(pattern, prompt_lower, re.IGNORECASE)
-            if match:
+            for match in re.finditer(pattern, prompt_lower, re.IGNORECASE):
                 arguments = arg_builder(match)
-                return {
-                    "id": f"map-{tool_name}-0",
+                steps.append({
+                    "id": f"map-{tool_name}-{idx}",
                     "type": "function",
                     "function": {
                         "name": tool_name,
                         "arguments": json.dumps(arguments),
                     },
-                }
-        return None
+                })
+                idx += 1
+
+        return steps
 
     @property
     def template_count(self) -> int:
