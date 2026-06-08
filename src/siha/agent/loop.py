@@ -119,6 +119,9 @@ class AgentLoop:
         for step in steps:
             tool_name = step["function"]["name"]
             tool_args = self._parse_args(step["function"]["arguments"])
+            # Resolve relative file paths against working memory context
+            if tool_name in ("write_file", "read_file") and "path" in tool_args:
+                tool_args["path"] = self._resolve_path(tool_args["path"])
             _emit("action_step", {"tool": tool_name, "args": tool_args, "source": source})
 
             exec_start = time.time()
@@ -534,6 +537,15 @@ class AgentLoop:
             self.working_memory["last_written_file"] = tool_args.get("path", "")
         elif tool_name == "read_file":
             self.working_memory["last_read_file"] = tool_args.get("path", "")
+
+    def _resolve_path(self, path: str) -> str:
+        """Resolve relative paths using working memory context."""
+        if not path or "/" in path:
+            return path
+        last_folder = self.working_memory.get("last_created_folder")
+        if last_folder:
+            return f"{last_folder}/{path}"
+        return path
 
     def _build_working_memory_context(self) -> str:
         """Format working memory into a context string for the system prompt."""

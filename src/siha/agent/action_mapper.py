@@ -15,18 +15,25 @@ from typing import Any, Dict, List, Optional, Tuple
 ACTION_TEMPLATES: List[Tuple[str, str, callable]] = [
     # File / directory creation
     (
-        r'(?:create|make)\s+(?:a\s+)?(?:new\s+)?folder\s+(?:called\s+|named\s+)?["\']?([\w\-/]+)["\']?',
+        r'(?:create|make)\s+(?:a\s+)?(?:new\s+)?folder\s+(?:called\s+|named\s+)\s*["\']?([\w\-/]+)["\']?',
         "run_shell",
         lambda m: {"command": f"mkdir -p {m.group(1)}"},
     ),
+    # Natural language: "create [a] [filename] file with ..."
     (
-        r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?file\s+(?:called\s+|named\s+)?["\']?([^"\']+)["\']?\s+with\s+(?:content\s+)?(.+)',
+        r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?(?:\w+\s+)?([\w\-/]+\.\w+)\s+file\b.*?\s+with\s+(?:content\s+)?(.+)',
         "write_file",
         lambda m: {"path": m.group(1).strip(), "content": m.group(2).strip()},
     ),
-    # Bare file creation without explicit content (harness generates placeholder)
+    # Direct: "create file called X with ..."
     (
-        r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?file\s+(?:called\s+|named\s+)?["\']?([^"\']+\.\w+)["\']?\b(?!\s+with)',
+        r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?(?:\w+\s+)?file\s+(?:called\s+|named\s+)?["\']?([^"\']+)["\']?.*?\s+with\s+(?:content\s+)?(.+)',
+        "write_file",
+        lambda m: {"path": m.group(1).strip(), "content": m.group(2).strip()},
+    ),
+    # Bare file creation without explicit content
+    (
+        r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?(?:\w+\s+)?file\s+(?:called\s+|named\s+)?["\']?([^"\']+\.\w+)["\']?\b(?!\s+with)',
         "write_file",
         lambda m: {"path": m.group(1).strip(), "content": "# Generated file\n"},
     ),
