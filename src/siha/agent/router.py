@@ -31,6 +31,12 @@ class IntentRouter:
 
     def classify(self, user_prompt: str) -> str:
         """Classify user intent. Returns one of INTENTS."""
+        # Rule-based first — fast, deterministic, reliable for obvious cases.
+        rule_result = self._rule_based_classify(user_prompt)
+        if rule_result != "chat":
+            return rule_result
+
+        # Only use the LLM for edge cases where keywords didn't match anything.
         prompt = (
             "You are an intent classifier. Given a user message, classify it into exactly one category.\n"
             "Categories:\n"
@@ -50,25 +56,25 @@ class IntentRouter:
                 max_tokens=20,
             )
             text = response.choices[0].message.content.strip().lower()
-            # Extract just the category word
             for intent in self.INTENTS:
                 if intent in text:
                     return intent
-            return "chat"  # safest fallback
         except Exception:
-            # If router fails, use rule-based fallback
-            return self._rule_based_classify(user_prompt)
+            pass
+        return "chat"
 
     @staticmethod
     def _rule_based_classify(user_prompt: str) -> str:
         """Simple keyword-based fallback when the router model fails."""
         prompt_lower = user_prompt.lower()
 
-        # Tool-action keywords
+        # Tool-action keywords — these are strong signals the user wants action
         tool_keywords = [
             "create", "make", "build", "write", "generate", "run", "execute",
             "search", "find", "look up", "read", "open", "list", "delete",
             "move", "copy", "rename", "install", "fix", "debug", "test",
+            "mkdir", "touch", "cat", "ls", "cd", "rm", "cp", "mv",
+            "folder", "directory", "file",
         ]
         if any(kw in prompt_lower for kw in tool_keywords):
             return "tool_call"
@@ -76,7 +82,8 @@ class IntentRouter:
         # Code generation keywords
         code_keywords = [
             "html", "css", "javascript", "python", "script", "website",
-            "page", "component", "function", "class", "app",
+            "page", "component", "function", "class", "app", "dashboard",
+            "react", "vue", "angular", "typescript",
         ]
         if any(kw in prompt_lower for kw in code_keywords):
             return "code_generation"
@@ -84,7 +91,7 @@ class IntentRouter:
         # Analysis keywords
         analysis_keywords = [
             "analyze", "review", "explain", "what does", "how does",
-            "debug", "trace", "error", "bug", "why is",
+            "debug", "trace", "error", "bug", "why is", "inspect",
         ]
         if any(kw in prompt_lower for kw in analysis_keywords):
             return "analysis"
