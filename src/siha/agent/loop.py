@@ -307,11 +307,17 @@ class AgentLoop:
             "RULES:\n"
             "1. For greetings, chitchat, or simple questions, just reply in plain text.\n"
             "   NEVER output JSON or call tools for these.\n"
-            "2. Only use a tool when the user explicitly asks you to DO something\n"
-            "   (run code, read a file, search the web, etc.).\n"
+            "2. When the user asks you to DO something (create a file, run code,\n"
+            "   search the web, read a file, etc.), you MUST use the appropriate tool.\n"
+            "   Do NOT explain how to do it — actually DO it via a tool call.\n"
             "3. When a tool IS needed, output EXACTLY one JSON object and nothing else:\n"
             '   {"tool": "TOOL_NAME", "arguments": {"arg1": "value1"}}\n'
             "4. After receiving a tool result, continue the task or give a final answer.\n\n"
+            "EXAMPLE:\n"
+            'User: "Create a file hello.txt with Hello World inside"\n'
+            'WRONG: "Here is how you can create the file..."  (do NOT do this)\n'
+            'RIGHT: {"tool": "write_file", "arguments": {"path": "hello.txt", "content": "Hello World"}}\n'
+            "Then wait for the tool result and confirm completion.\n\n"
             "Available tools:\n"
             + "\n".join(tool_list)
         )
