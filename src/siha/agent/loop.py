@@ -3,7 +3,7 @@
 import json
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional
 from siha.llm.client import NvidiaClient
 from siha.db import get_session
 from siha.models import Task, Step, StepType, TaskStatus, ToolCall
@@ -29,9 +29,12 @@ class AgentLoop:
         user_prompt: str,
         sandbox_mode: str = "local",
         workspace_dir: Optional[Path] = None,
+        on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> Task:
         """Run the agent loop for a user prompt"""
         from siha.config import settings
+
+        _emit = on_event if on_event is not None else (lambda _e, _d: None)
 
         start_time = time.time()
         self.step_count = 0
@@ -69,35 +72,77 @@ class AgentLoop:
         try:
             while self.step_count < settings.step_budget:
                 step_start = time.time()
+                _emit("thinking_start", {"step": self.step_count})
 
-                response = self.client.chat(messages, tools=tools)
-                choice = response.choices[0]
-                message = choice.message
-                tokens = response.usage.total_tokens if response.usage else 0
+                # Stream the LLM response and accumulate tokens + tool calls.
+                content_parts: List[str] = []
+                reasoning_parts: List[str] = []
+                tool_calls_acc: Dict[int, Dict[str, Any]] = {}
+                finish_reason: Optional[str] = None
+                total_tokens = 0
 
-                if message.tool_calls:
+                for chunk in self.client.stream(messages, tools=tools):
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+                    delta = choice.delta
+
+                    reasoning = self.client.extract_reasoning(chunk)
+                    if reasoning:
+                        reasoning_parts.append(reasoning)
+                        _emit("reasoning_token", {"token": reasoning, "step": self.step_count})
+
+                    if delta.content:
+                        content_parts.append(delta.content)
+                        _emit("content_token", {"token": delta.content, "step": self.step_count})
+
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_calls_acc:
+                                tool_calls_acc[idx] = {
+                                    "id": "",
+                                    "type": "function",
+                                    "function": {"name": "", "arguments": ""},
+                                }
+                            if tc_delta.id:
+                                tool_calls_acc[idx]["id"] = tc_delta.id
+                            if tc_delta.function:
+                                if tc_delta.function.name:
+                                    tool_calls_acc[idx]["function"]["name"] += tc_delta.function.name
+                                if tc_delta.function.arguments:
+                                    tool_calls_acc[idx]["function"]["arguments"] += tc_delta.function.arguments
+
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        total_tokens = chunk.usage.total_tokens or 0
+
+                full_content = "".join(content_parts)
+                tool_calls_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
+
+                if tool_calls_list:
                     self._record_step(
                         StepType.tool_call,
-                        {"tool_calls": [tc.model_dump() for tc in message.tool_calls]},
-                        tokens,
+                        {"tool_calls": tool_calls_list},
+                        total_tokens,
                         int((time.time() - step_start) * 1000),
                     )
 
-                    # Append the assistant message with ALL tool calls once.
                     messages.append({
                         "role": "assistant",
-                        "content": message.content or "",
-                        "tool_calls": [tc.model_dump() for tc in message.tool_calls],
+                        "content": full_content or "",
+                        "tool_calls": tool_calls_list,
                     })
 
-                    # Then one tool response message per tool call.
-                    for tool_call in message.tool_calls:
-                        tool_name = tool_call.function.name
-                        tool_args = self._parse_args(tool_call.function.arguments)
+                    for tool_call in tool_calls_list:
+                        tool_name = tool_call["function"]["name"]
+                        tool_args = self._parse_args(tool_call["function"]["arguments"])
+                        _emit("tool_called", {"tool": tool_name, "args": tool_args, "step": self.step_count})
 
-                        tool_start = time.time()
+                        tool_exec_start = time.time()
                         tool_result = self._execute_tool(tool_name, tool_args)
-                        tool_duration_ms = int((time.time() - tool_start) * 1000)
+                        tool_duration_ms = int((time.time() - tool_exec_start) * 1000)
                         self._record_tool_call(tool_name, tool_args, tool_result, tool_duration_ms)
 
                         content = tool_result.output or tool_result.error or ""
@@ -122,23 +167,32 @@ class AgentLoop:
                                 "duration_ms": tool_duration_ms,
                             },
                         )
+                        _emit("tool_result", {
+                            "tool": tool_name,
+                            "success": tool_result.success,
+                            "output": (tool_result.output or "")[:300],
+                            "error": tool_result.error,
+                            "duration_ms": tool_duration_ms,
+                            "step": self.step_count,
+                        })
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tool_call.id,
+                            "tool_call_id": tool_call["id"],
                             "content": content[: settings.max_output_bytes],
                         })
                 else:
                     self._record_step(
                         StepType.plan,
-                        {"content": message.content},
-                        tokens,
+                        {"content": full_content},
+                        total_tokens,
                         int((time.time() - step_start) * 1000),
                     )
 
-                    if choice.finish_reason == "stop":
-                        final_answer = message.content or ""
+                    if finish_reason == "stop":
+                        final_answer = full_content or ""
                         messages.append({"role": "assistant", "content": final_answer})
-                        self._record_step(StepType.final, {"content": final_answer}, tokens, 0)
+                        self._record_step(StepType.final, {"content": final_answer}, total_tokens, 0)
+                        _emit("final_answer", {"content": final_answer})
                         break
 
             else:
