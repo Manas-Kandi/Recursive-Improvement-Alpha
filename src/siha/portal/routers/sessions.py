@@ -25,6 +25,8 @@ def get_sessions(limit: int = 50, token: str = Depends(verify_auth)):
                 status=t.status,
                 duration_ms=t.duration_ms,
                 ts=t.ts.isoformat(),
+                category=t.category,
+                trace_id=t.trace_id,
             )
             for t in tasks
         ]
@@ -51,6 +53,8 @@ def get_session_detail(session_id: int, token: str = Depends(verify_auth)):
                 "sandbox_mode": task.sandbox_mode,
                 "error_summary": task.error_summary,
                 "ts": task.ts.isoformat(),
+                "category": task.category,
+                "trace_id": task.trace_id,
             },
             steps=[
                 {

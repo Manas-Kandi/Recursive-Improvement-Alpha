@@ -2,13 +2,14 @@
 
 from typing import Dict, Any
 from siha.db import get_session
-from siha.models import Benchmark, BenchmarkRun, HarnessVersion, BenchmarkOrigin, Step
+from siha.models import Benchmark, BenchmarkRun, HarnessVersion, BenchmarkOrigin, Step, TaskCategory
 from siha.agent.loop import AgentLoop
 from siha.config import settings
 import re
 import tempfile
 import time
 from pathlib import Path
+from uuid import uuid4
 
 
 def seed_benchmarks():
@@ -126,6 +127,7 @@ class BenchmarkRunner:
 
         # Isolate each benchmark in its own workspace
         workspace = Path(tempfile.mkdtemp(prefix=f"siha_bench_{benchmark.name}_"))
+        trace_id = str(uuid4())
 
         # Run the task with low temperature for determinism
         agent = AgentLoop(harness_version_id=harness_version_id)
@@ -135,6 +137,8 @@ class BenchmarkRunner:
             benchmark.task_spec.get("prompt", ""),
             sandbox_mode=benchmark.task_spec.get("sandbox", "local"),
             workspace_dir=workspace,
+            category=TaskCategory.benchmark,
+            trace_id=trace_id,
         )
 
         duration_ms = int((time.time() - start_time) * 1000)

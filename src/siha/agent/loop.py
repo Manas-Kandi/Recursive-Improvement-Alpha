@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, List, Dict, Any, Optional
 from siha.llm.factory import create_llm_client
 from siha.db import get_session
-from siha.models import Task, Step, StepType, TaskStatus, ToolCall
+from siha.models import Task, Step, StepType, TaskStatus, TaskCategory, ToolCall
 from siha.tools.registry import ToolRegistry
 from siha.sandbox import create_sandbox
 from siha.portal.events import event_bus
@@ -37,14 +37,18 @@ class AgentLoop:
         workspace_dir: Optional[Path] = None,
         on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         history: Optional[List[Dict[str, Any]]] = None,
+        category: TaskCategory = TaskCategory.user,
+        trace_id: Optional[str] = None,
     ) -> Task:
-        """Run the agent loop for a user prompt"""
+        """Run the agent loop for a user prompt."""
         from siha.config import settings
+        from uuid import uuid4
 
         _emit = on_event if on_event is not None else (lambda _e, _d: None)
 
         start_time = time.time()
         self.step_count = 0
+        resolved_trace_id = trace_id or str(uuid4())
 
         # Create task record
         with get_session() as session:
@@ -54,12 +58,14 @@ class AgentLoop:
                 status=TaskStatus.running,
                 sandbox_mode=sandbox_mode,
                 harness_version_id=self.harness_version_id,
+                category=category,
+                trace_id=resolved_trace_id,
             )
             session.add(self.task)
             session.commit()
             session.refresh(self.task)
             task_id = self.task.id
-        event_bus.publish("task_started", {"task_id": task_id, "prompt": user_prompt})
+        event_bus.publish("task_started", {"task_id": task_id, "prompt": user_prompt, "trace_id": resolved_trace_id})
 
         # Bind a shared per-task sandbox to all tools.
         self.sandbox = create_sandbox(sandbox_mode, workspace_dir=workspace_dir)

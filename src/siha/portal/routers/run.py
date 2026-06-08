@@ -20,13 +20,19 @@ def run_task(payload: RunTaskPayload, token: str = Depends(verify_auth)):
     sandbox = payload.sandbox or settings.sandbox_default
     model = payload.model
     harness_version_id = payload.harness_version_id
+    trace_id = payload.trace_id
 
     agent = AgentLoop(model=model, harness_version_id=harness_version_id)
-    task = agent.run(prompt, sandbox_mode=sandbox)
+    task = agent.run(
+        prompt,
+        sandbox_mode=sandbox,
+        trace_id=trace_id,
+    )
     return RunTaskResponse(
         id=task.id,
         status=task.status,
         duration_ms=task.duration_ms,
         final_answer=task.final_answer,
         error_summary=task.error_summary,
+        trace_id=task.trace_id,
     )

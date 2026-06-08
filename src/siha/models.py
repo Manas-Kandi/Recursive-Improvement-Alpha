@@ -12,6 +12,12 @@ class TaskStatus(str, Enum):
     failed = "failed"
 
 
+class TaskCategory(str, Enum):
+    user = "user"
+    benchmark = "benchmark"
+    system = "system"
+
+
 class StepType(str, Enum):
     plan = "plan"
     tool_call = "tool_call"
@@ -85,6 +91,8 @@ class Task(SQLModel, table=True):
     final_answer: Optional[str] = None
     analyzed: bool = Field(default=False)
     harness_version_id: Optional[int] = Field(default=None)
+    category: TaskCategory = Field(default=TaskCategory.user)
+    trace_id: Optional[str] = Field(default=None, index=True)
 
     steps: List["Step"] = Relationship(back_populates="task")
     tool_calls: List["ToolCall"] = Relationship(back_populates="task")

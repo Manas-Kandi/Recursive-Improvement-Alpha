@@ -34,6 +34,8 @@ class SessionListItem(BaseModel):
     status: str
     duration_ms: Optional[int]
     ts: str
+    category: str
+    trace_id: Optional[str]
 
 
 class StepDetail(BaseModel):
@@ -66,6 +68,8 @@ class TaskDetail(BaseModel):
     sandbox_mode: str
     error_summary: Optional[str]
     ts: str
+    category: str
+    trace_id: Optional[str]
 
 
 class SessionDetail(BaseModel):
@@ -213,6 +217,7 @@ class RunTaskPayload(BaseModel):
     sandbox: Optional[str] = None
     model: Optional[str] = None
     harness_version_id: Optional[int] = None
+    trace_id: Optional[str] = None
 
 
 class RunTaskResponse(BaseModel):
@@ -222,6 +227,7 @@ class RunTaskResponse(BaseModel):
     duration_ms: Optional[int]
     final_answer: Optional[str]
     error_summary: Optional[str]
+    trace_id: Optional[str]
 
 
 # -- Improvement schemas --

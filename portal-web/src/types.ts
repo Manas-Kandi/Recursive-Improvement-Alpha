@@ -7,6 +7,8 @@ export interface SessionItem {
   status: string
   duration_ms: number | null
   ts: string
+  category: string
+  trace_id: string | null
 }
 
 export interface StepDetail {
@@ -36,6 +38,8 @@ export interface TaskDetail {
   sandbox_mode: string
   error_summary: string | null
   ts: string
+  category: string
+  trace_id: string | null
 }
 
 export interface SessionDetail {
@@ -156,6 +160,7 @@ export interface RunTaskPayload {
   sandbox?: string
   model?: string
   harness_version_id?: number
+  trace_id?: string
 }
 
 export interface RunTaskResponse {
@@ -164,6 +169,7 @@ export interface RunTaskResponse {
   duration_ms: number | null
   final_answer: string | null
   error_summary: string | null
+  trace_id: string | null
 }
 
 export interface ImprovementTriggerResponse {

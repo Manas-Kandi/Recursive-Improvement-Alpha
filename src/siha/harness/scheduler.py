@@ -1,4 +1,4 @@
-"""Background improvement and benchmark job scheduler"""
+"""Background improvement and benchmark job scheduler."""
 
 import threading
 import time
@@ -9,6 +9,9 @@ from siha.harness.analyzer import Analyzer
 from siha.harness.mutator import Mutator
 from siha.harness.evaluator import Evaluator
 from siha.config import settings
+from siha.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class Scheduler:
@@ -49,7 +52,7 @@ class Scheduler:
                 # Sleep for interval
                 time.sleep(settings.improve_interval_s)
             except Exception as e:
-                print(f"Scheduler error: {e}")
+                logger.error("Scheduler error", exc_info=True, extra={"error": str(e)})
                 time.sleep(10)
     
     def _analyze_completed_tasks(self):
@@ -76,7 +79,7 @@ class Scheduler:
 
                 self._maybe_generate_benchmark(task_id)
             except Exception as e:
-                print(f"Analyzer error for task {task_id}: {e}")
+                logger.error("Analyzer error", exc_info=True, extra={"task_id": task_id, "error": str(e)})
             finally:
                 with get_session() as session:
                     task = session.get(Task, task_id)
@@ -92,7 +95,7 @@ class Scheduler:
 
             BenchmarkGenerator().generate_from_task(task_id)
         except Exception as e:
-            print(f"Benchmark generation skipped: {e}")
+            logger.warning("Benchmark generation skipped", extra={"task_id": task_id, "error": str(e)})
 
     def _evaluate_pending_mutations(self):
         """Evaluate candidate mutations against benchmarks and promote or rollback."""
@@ -116,7 +119,7 @@ class Scheduler:
                 else:
                     self.mutator.rollback_mutation(mutation)
             except Exception as e:
-                print(f"Evaluator error for mutation {mutation_id}: {e}")
+                logger.error("Evaluator error", exc_info=True, extra={"mutation_id": mutation_id, "error": str(e)})
 
     def trigger_improvement(self):
         """Manually trigger improvement cycle"""
