@@ -13,16 +13,78 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.spinner import Spinner
 from rich.syntax import Syntax
+from rich.table import Table
 from rich.text import Text
 
 from siha.db import init_db as init_database, get_session
 from siha.agent.loop import AgentLoop
 from siha.agent.prompts import seed_default_prompts
 from siha.config import settings
+from siha.llm.ollama import is_ollama_reachable
+from siha.llm.local_gguf import is_llama_cpp_available
+from siha.llm.factory import detect_provider
 from siha.models import TaskStatus
 
-app = typer.Typer()
+app = typer.Typer(no_args_is_help=False)
 console = Console()
+
+
+def _show_main_menu() -> None:
+    """Render the interactive main menu."""
+    nvidia_ok = bool(settings.nvidia_api_key)
+    ollama_ok = is_ollama_reachable()
+    local_ok = is_llama_cpp_available()
+
+    status = Text()
+    status.append("NVIDIA key: ", style="dim")
+    status.append("✓ set" if nvidia_ok else "✗ missing", style="green" if nvidia_ok else "red")
+    status.append("  ·  Ollama: ", style="dim")
+    status.append("✓ detected" if ollama_ok else "✗ not found", style="green" if ollama_ok else "red")
+    status.append("  ·  Local GGUF: ", style="dim")
+    status.append("✓ ready" if local_ok else "✗ not installed", style="green" if local_ok else "red")
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold cyan", justify="right")
+    table.add_column()
+
+    table.add_row("1", "Chat with NVIDIA cloud model  [dim](fast, requires API key)[/dim]")
+    table.add_row("2", "Chat with local model           [dim](runs on your machine, no API key)[/dim]")
+    table.add_row("3", "Launch developer portal         [dim](backend + UI)[/dim]")
+    table.add_row("4", "Run benchmarks")
+    table.add_row("5", "Trigger self-improvement cycle")
+    table.add_row("6", "Init database")
+    table.add_row("7", "Exit")
+
+    console.print(Panel.fit(
+        Group(
+            Text("  ✦ 9xf-code", style="bold bright_white"),
+            Text(""),
+            status,
+            Text(""),
+            table,
+            Text(""),
+            Text("  Type a number to choose, or use subcommands directly:", style="dim"),
+            Text("    siha chat | siha portal | siha bench | siha improve | siha init-db", style="dim"),
+        ),
+        title="[bold bright_white]✦ Main Menu[/bold bright_white]",
+        border_style="bright_white",
+    ))
+
+
+def _prompt_provider_choice() -> str:
+    """Ask the user which local provider they want."""
+    console.print("")
+    console.print("  [bold]Local model options:[/bold]")
+    console.print("    a) Auto-detect (Ollama → in-process tiny model)")
+    console.print("    b) Use Ollama")
+    console.print("    c) Use in-process tiny model (auto-download)")
+    choice = console.input("  [bold cyan]Choice:[/bold cyan] ").strip().lower()
+    if choice == "b":
+        return "ollama"
+    if choice == "c":
+        return "local"
+    return "auto"
+
 
 _TOOL_ICONS: Dict[str, str] = {
     "read_file": "📖",
@@ -173,6 +235,45 @@ class AgentDisplay:
         return Group(Rule("[dim]Activity[/dim]", style="bright_black"), *items, Text(""))
 
 
+@app.callback(invoke_without_command=True)
+def default(ctx: typer.Context):
+    """Interactive menu when called without a subcommand."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    while True:
+        _show_main_menu()
+        choice = console.input("[bold cyan]Choice:[/bold cyan] ").strip()
+
+        if choice == "1":
+            if not settings.nvidia_api_key:
+                console.print("[red]NVIDIA_API_KEY is not set. Add it to .env and try again.[/red]")
+                continue
+            chat()
+            return
+        elif choice == "2":
+            provider = _prompt_provider_choice()
+            chat(provider=provider)
+            return
+        elif choice == "3":
+            portal()
+            return
+        elif choice == "4":
+            bench()
+            return
+        elif choice == "5":
+            improve()
+            return
+        elif choice == "6":
+            init_db()
+            return
+        elif choice in ("7", "exit", "quit", "q"):
+            console.print("[dim]Goodbye.[/dim]")
+            raise typer.Exit(0)
+        else:
+            console.print("[red]Invalid choice. Try again.[/red]")
+
+
 @app.command()
 def init_db():
     """Initialize the database"""
@@ -186,6 +287,7 @@ def chat(
     model: str = typer.Option(None, "--model", "-m", help="Model to use"),
     sandbox: str = typer.Option("local", "--sandbox", "-s", help="Sandbox mode: local or docker"),
     workspace: Path = typer.Option(Path.cwd(), "--workspace", "-w", help="Folder the agent may read/write"),
+    provider: str = typer.Option(None, "--provider", "-p", help="LLM provider: nvidia, ollama, local, auto"),
 ):
     """Interactive chat with the coding agent"""
     workspace = workspace.expanduser().resolve()
@@ -193,17 +295,19 @@ def chat(
 
     active_model = model or settings.agent_model
     short_model = active_model.split("/")[-1] if "/" in active_model else active_model
+    active_provider = (provider or settings.llm_provider).lower()
 
     console.print(Panel.fit(
         f"[bold]9xf-code[/bold]\n"
         f"Model: [cyan]{short_model}[/cyan]\n"
+        f"Provider: [magenta]{active_provider}[/magenta]\n"
         f"Sandbox: {sandbox}   Workspace: {workspace}\n"
         f"[dim]Type 'exit' to quit, 'clear' to reset context[/dim]",
         title="[bold bright_white]✦ 9xf-code[/bold bright_white]",
         border_style="bright_white",
     ))
 
-    agent = AgentLoop(model)
+    agent = AgentLoop(model=model, provider=active_provider)
     conversation_history: List[Dict[str, Any]] = []
     _MAX_HISTORY = 20  # keep last 20 messages (~10 turns)
 

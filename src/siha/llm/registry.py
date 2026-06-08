@@ -20,7 +20,22 @@ MODEL_CATALOG = {
         "supports_reasoning": False,
         "supports_streaming": True,
         "description": "Instruction-tuned Gemma model"
-    }
+    },
+    "qwen2.5-coder:0.5b": {
+        "supports_reasoning": False,
+        "supports_streaming": True,
+        "description": "Tiny Ollama coding model (~0.5B params)"
+    },
+    "phi4-mini": {
+        "supports_reasoning": False,
+        "supports_streaming": True,
+        "description": "Tiny Ollama coding model (~3.8B params)"
+    },
+    "local-gguf": {
+        "supports_reasoning": False,
+        "supports_streaming": True,
+        "description": "In-process tiny GGUF (auto-downloaded)"
+    },
 }
 
 

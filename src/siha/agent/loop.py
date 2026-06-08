@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 from typing import Callable, List, Dict, Any, Optional
-from siha.llm.client import NvidiaClient
+from siha.llm.factory import create_llm_client
 from siha.db import get_session
 from siha.models import Task, Step, StepType, TaskStatus, ToolCall
 from siha.tools.registry import ToolRegistry
@@ -15,8 +15,8 @@ from siha.portal.events import event_bus
 class AgentLoop:
     """ReAct-style agent loop with tool calling"""
 
-    def __init__(self, model: Optional[str] = None):
-        self.client = NvidiaClient(model)
+    def __init__(self, model: Optional[str] = None, provider: Optional[str] = None):
+        self.client = create_llm_client(model=model, provider=provider)
         self.step_count = 0
         self.task: Optional[Task] = None
         # Each loop gets its own registry so a per-task sandbox can be bound
