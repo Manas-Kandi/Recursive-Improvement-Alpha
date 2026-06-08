@@ -14,8 +14,8 @@ A self-improving CLI coding agent powered by NVIDIA LLMs. It plans, writes, and 
 
 ```bash
 # 1. Clone
-git clone <repository-url>
-cd Self-Improving-Harness
+git clone https://github.com/Manas-Kandi/Recursive-Improvement-Alpha
+cd Recursive-Improvement-Alpha
 
 # 2. Create and activate a virtual environment
 python3 -m venv venv
