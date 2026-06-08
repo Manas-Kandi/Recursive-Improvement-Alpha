@@ -30,6 +30,7 @@ class AgentLoop:
         sandbox_mode: str = "local",
         workspace_dir: Optional[Path] = None,
         on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        history: Optional[List[Dict[str, Any]]] = None,
     ) -> Task:
         """Run the agent loop for a user prompt"""
         from siha.config import settings
@@ -57,11 +58,11 @@ class AgentLoop:
         self.sandbox = create_sandbox(sandbox_mode, workspace_dir=workspace_dir)
         self.registry.set_sandbox(self.sandbox)
 
-        # Build initial messages
-        messages = [
-            {"role": "system", "content": self._get_system_prompt()},
-            {"role": "user", "content": user_prompt},
-        ]
+        # Build initial messages — inject prior conversation turns for context
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": self._get_system_prompt()}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": user_prompt})
 
         tools = self.registry.to_openai_tools()
 

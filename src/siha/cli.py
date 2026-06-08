@@ -19,6 +19,7 @@ from siha.db import init_db as init_database, get_session
 from siha.agent.loop import AgentLoop
 from siha.agent.prompts import seed_default_prompts
 from siha.config import settings
+from siha.models import TaskStatus
 
 app = typer.Typer()
 console = Console()
@@ -45,6 +46,7 @@ _CODE_EXTS: Dict[str, str] = {
 @dataclass
 class AgentDisplay:
     model: str
+    turns: int = 0
     start_time: float = field(default_factory=time.time)
     step: int = 0
     status: str = "idle"
@@ -64,10 +66,12 @@ class AgentDisplay:
         short_model = self.model.split("/")[-1] if "/" in self.model else self.model
 
         header = Text(justify="left", overflow="fold")
-        header.append("  ✦ SIHA", style="bold bright_white")
+        header.append("  ✦ 9xf-code", style="bold bright_white")
         header.append(f"  ·  {short_model}", style="dim white")
         header.append(f"  ·  step {self.step}", style="dim cyan")
         header.append(f"  ·  {elapsed:.1f}s", style="dim yellow")
+        if self.turns > 0:
+            header.append(f"  ·  {self.turns}t", style="dim magenta")
         header_panel = Panel(header, border_style="bright_black", padding=(0, 1))
 
         content_panel = self._render_content()
@@ -191,15 +195,17 @@ def chat(
     short_model = active_model.split("/")[-1] if "/" in active_model else active_model
 
     console.print(Panel.fit(
-        f"[bold]Self-Improving Harness[/bold]\n"
+        f"[bold]9xf-code[/bold]\n"
         f"Model: [cyan]{short_model}[/cyan]\n"
         f"Sandbox: {sandbox}   Workspace: {workspace}\n"
-        f"[dim]Type 'exit' to quit[/dim]",
-        title="[bold bright_white]✦ SIHA[/bold bright_white]",
+        f"[dim]Type 'exit' to quit, 'clear' to reset context[/dim]",
+        title="[bold bright_white]✦ 9xf-code[/bold bright_white]",
         border_style="bright_white",
     ))
 
     agent = AgentLoop(model)
+    conversation_history: List[Dict[str, Any]] = []
+    _MAX_HISTORY = 20  # keep last 20 messages (~10 turns)
 
     while True:
         try:
@@ -209,10 +215,16 @@ def chat(
                 console.print("[dim]Goodbye.[/dim]")
                 break
 
+            if user_input.strip().lower() == "clear":
+                conversation_history.clear()
+                console.print("[dim]Context cleared.[/dim]")
+                continue
+
             if not user_input.strip():
                 continue
 
-            display = AgentDisplay(model=active_model)
+            turns = len(conversation_history) // 2
+            display = AgentDisplay(model=active_model, turns=turns)
 
             with Live(display.render(), console=console, refresh_per_second=10, transient=True) as live:
 
@@ -251,10 +263,18 @@ def chat(
                     sandbox_mode=sandbox,
                     workspace_dir=workspace,
                     on_event=on_event,
+                    history=conversation_history[-_MAX_HISTORY:] if conversation_history else None,
                 )
 
+            # Append this turn to history so the next turn has context
+            conversation_history.append({"role": "user", "content": user_input})
+            if task.final_answer:
+                conversation_history.append({"role": "assistant", "content": task.final_answer})
+            elif task.status == TaskStatus.success:
+                conversation_history.append({"role": "assistant", "content": "I completed the task."})
+
             elapsed = f"{(task.duration_ms or 0) / 1000:.1f}s"
-            if task.status == "success":
+            if task.status == TaskStatus.success:
                 console.print(f"[bold green]✓[/bold green] [dim]done in {elapsed}[/dim]\n")
             else:
                 console.print(f"[bold red]✗[/bold red] [dim]failed in {elapsed}[/dim]\n")
@@ -282,14 +302,54 @@ def chat(
 
 @app.command()
 def portal():
-    """Launch the developer portal"""
+    """Launch the developer portal (backend + frontend dev server)"""
+    import atexit
+    import subprocess
     import uvicorn
-    from siha.portal.api import app
-    
-    console.print("[green]Starting portal backend on http://localhost:8000[/green]")
-    console.print(f"[yellow]Auth token: {settings.portal_dev_token}[/yellow]")
-    
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    from siha.portal.api import app as api_app
+
+    frontend_dir = Path(__file__).parent.parent.parent / "portal-web"
+
+    if not frontend_dir.exists():
+        console.print(f"[red]Frontend not found at {frontend_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Install npm dependencies if not present
+    if not (frontend_dir / "node_modules" / "vite").exists():
+        console.print("[cyan]Installing frontend dependencies (first run)...[/cyan]")
+        result = subprocess.run(["npm", "install"], cwd=str(frontend_dir))
+        if result.returncode != 0:
+            console.print("[red]npm install failed — make sure Node.js is installed.[/red]")
+            raise typer.Exit(1)
+
+    # Start Vite dev server in the background
+    npm_proc = subprocess.Popen(
+        ["npm", "run", "dev"],
+        cwd=str(frontend_dir),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    def _cleanup():
+        npm_proc.terminate()
+        try:
+            npm_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            npm_proc.kill()
+
+    atexit.register(_cleanup)
+
+    console.print(Panel.fit(
+        f"[bold]9xf-code Portal[/bold]\n\n"
+        f"  [green]→[/green]  Open [bold cyan]http://localhost:3000[/bold cyan] in your browser\n\n"
+        f"  [dim]Backend API:[/dim]  http://localhost:8000\n"
+        f"  [dim]Auth token:[/dim]   {settings.portal_dev_token}\n\n"
+        f"  [dim]Ctrl+C to stop[/dim]",
+        title="[bold bright_white]✦ 9xf-code Portal[/bold bright_white]",
+        border_style="bright_white",
+    ))
+
+    uvicorn.run(api_app, host="0.0.0.0", port=8000, log_level="warning")
 
 
 @app.command()

@@ -1,7 +1,7 @@
 [project]
 name = "siha"
 version = "0.1.0"
-description = "Self-Improving CLI Coding Agent with Developer Portal"
+description = "9xf-code: Self-Improving CLI Coding Agent with Developer Portal"
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.0.0",

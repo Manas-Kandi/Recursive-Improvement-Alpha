@@ -1,6 +1,7 @@
 """FastAPI backend with REST + SSE + auth"""
 
 from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 from typing import List, Optional
@@ -12,7 +13,15 @@ from siha.portal.events import event_bus
 import json
 
 
-app = FastAPI(title="SIHA Portal")
+app = FastAPI(title="9xf-code Portal")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Background self-improvement scheduler (started on app startup).
 _scheduler = None
