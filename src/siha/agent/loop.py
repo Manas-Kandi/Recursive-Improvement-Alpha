@@ -8,6 +8,7 @@ from siha.db import get_session
 from siha.models import Task, Step, StepType, TaskStatus, ToolCall
 from siha.tools.registry import ToolRegistry
 from siha.sandbox import create_sandbox
+from siha.portal.events import event_bus
 
 
 class AgentLoop:
@@ -41,6 +42,7 @@ class AgentLoop:
             session.commit()
             session.refresh(self.task)
             task_id = self.task.id
+        event_bus.publish("task_started", {"task_id": task_id, "prompt": user_prompt})
 
         # Bind a shared per-task sandbox to all tools.
         self.sandbox = create_sandbox(sandbox_mode)
@@ -87,10 +89,33 @@ class AgentLoop:
                         tool_name = tool_call.function.name
                         tool_args = self._parse_args(tool_call.function.arguments)
 
+                        tool_start = time.time()
                         tool_result = self._execute_tool(tool_name, tool_args)
-                        self._record_tool_call(tool_name, tool_args, tool_result)
+                        tool_duration_ms = int((time.time() - tool_start) * 1000)
+                        self._record_tool_call(tool_name, tool_args, tool_result, tool_duration_ms)
 
                         content = tool_result.output or tool_result.error or ""
+                        self._record_step(
+                            StepType.observation,
+                            {
+                                "tool": tool_name,
+                                "success": tool_result.success,
+                                "output": tool_result.output,
+                                "error": tool_result.error,
+                                "data": tool_result.data,
+                            },
+                            0,
+                            tool_duration_ms,
+                        )
+                        event_bus.publish(
+                            "tool_call",
+                            {
+                                "task_id": task_id,
+                                "tool": tool_name,
+                                "success": tool_result.success,
+                                "duration_ms": tool_duration_ms,
+                            },
+                        )
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -110,7 +135,6 @@ class AgentLoop:
                         self._record_step(StepType.final, {"content": final_answer}, tokens, 0)
                         break
 
-                self.step_count += 1
             else:
                 # Loop exhausted the step budget without a final answer.
                 status = TaskStatus.failed
@@ -135,6 +159,15 @@ class AgentLoop:
             session.commit()
             session.refresh(task)
             self.task = task
+        event_bus.publish(
+            "task_finished",
+            {
+                "task_id": task_id,
+                "status": status.value,
+                "duration_ms": duration_ms,
+                "error_summary": error_summary,
+            },
+        )
 
         return self.task
 
@@ -176,6 +209,7 @@ class AgentLoop:
             )
             session.add(step)
             session.commit()
+            self.step_count += 1
     
     def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]):
         """Execute a tool by name"""
@@ -190,7 +224,7 @@ class AgentLoop:
                 error=str(e)
             )
     
-    def _record_tool_call(self, tool_name: str, tool_args: Dict[str, Any], tool_result):
+    def _record_tool_call(self, tool_name: str, tool_args: Dict[str, Any], tool_result, duration_ms: int = 0):
         """Record a tool call to the database"""
         from siha.models import Tool as ToolModel
         
@@ -215,7 +249,7 @@ class AgentLoop:
                 args=tool_args,
                 result={"output": tool_result.output, "error": tool_result.error, "data": tool_result.data},
                 success=tool_result.success,
-                duration_ms=0  # TODO: track actual duration
+                duration_ms=duration_ms
             )
             session.add(tool_call)
             session.commit()

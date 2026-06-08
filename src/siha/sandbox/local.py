@@ -3,11 +3,11 @@
 import subprocess
 import tempfile
 import shutil
-import os
 import time
 from pathlib import Path
 from typing import Dict, Optional
 from siha.sandbox.base import Sandbox, SandboxResult
+from siha.config import settings
 
 
 class LocalSandbox(Sandbox):
@@ -52,10 +52,12 @@ class LocalSandbox(Sandbox):
             
             duration_ms = int((time.time() - start_time) * 1000)
             
+            stdout = result.stdout[: settings.max_output_bytes]
+            stderr = result.stderr[: settings.max_output_bytes]
             return SandboxResult(
                 success=result.returncode == 0,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                stdout=stdout,
+                stderr=stderr,
                 exit_code=result.returncode,
                 duration_ms=duration_ms
             )

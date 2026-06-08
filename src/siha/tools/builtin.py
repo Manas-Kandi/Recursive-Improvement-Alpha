@@ -1,6 +1,7 @@
 """Built-in tools: run_python, run_shell, read/write_file, list_dir, web_search, browse_web"""
 
 from typing import Dict, Any, Optional
+import shlex
 from siha.tools.base import Tool, ToolResult
 from siha.sandbox.base import Sandbox
 from siha.sandbox.local import LocalSandbox
@@ -124,7 +125,7 @@ class ReadFileTool(SandboxTool):
     
     def run(self, **kwargs) -> ToolResult:
         path = kwargs.get("path", "")
-        result = self.sandbox.run(f"cat {path}")
+        result = self.sandbox.run(f"cat {shlex.quote(path)}")
         if result.success:
             return ToolResult(
                 success=True,
@@ -171,9 +172,6 @@ class WriteFileTool(SandboxTool):
     def run(self, **kwargs) -> ToolResult:
         path = kwargs.get("path", "")
         content = kwargs.get("content", "")
-        # Write via the sandbox's file mechanism so content with quotes,
-        # newlines, or shell metacharacters is preserved verbatim.
-        import shlex
         result = self.sandbox.run(
             f"mkdir -p $(dirname {shlex.quote(path)}) && cp __siha_write__ {shlex.quote(path)}",
             files={"__siha_write__": content},
@@ -219,7 +217,7 @@ class ListDirTool(SandboxTool):
     
     def run(self, **kwargs) -> ToolResult:
         path = kwargs.get("path", ".")
-        result = self.sandbox.run(f"ls -la {path}")
+        result = self.sandbox.run(f"ls -la {shlex.quote(path)}")
         if result.success:
             return ToolResult(
                 success=True,
@@ -260,34 +258,13 @@ class WebSearchTool(Tool):
         }
     
     def run(self, **kwargs) -> ToolResult:
-        import httpx
-        from siha.config import settings
+        from siha.tools.search import get_search_provider
 
         query = kwargs.get("query", "")
         max_results = int(kwargs.get("max_results", 5))
 
-        if not settings.search_api_key:
-            return ToolResult(
-                success=False,
-                output="",
-                error="SEARCH_API_KEY is not configured. Set a Tavily API key in .env to enable web search.",
-                data={"query": query},
-            )
-
         try:
-            # Tavily search API (https://tavily.com)
-            resp = httpx.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": settings.search_api_key,
-                    "query": query,
-                    "max_results": max_results,
-                },
-                timeout=30,
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-            results = payload.get("results", [])
+            results = get_search_provider().search(query, max_results=max_results)
             lines = [
                 f"- {r.get('title', '')}\n  {r.get('url', '')}\n  {r.get('content', '')[:300]}"
                 for r in results

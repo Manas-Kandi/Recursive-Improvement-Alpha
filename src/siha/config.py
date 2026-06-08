@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     # API Keys
     nvidia_api_key: str = ""
     search_api_key: str = ""
+    search_provider: Literal["auto", "tavily", "brave", "duckduckgo"] = "auto"
     portal_dev_token: str = "dev"
     
     # Model Configuration

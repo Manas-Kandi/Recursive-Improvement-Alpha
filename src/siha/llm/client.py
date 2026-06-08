@@ -1,6 +1,8 @@
 """NVIDIA LLM client with streaming and reasoning support"""
 
-from openai import OpenAI, Stream
+import time
+from openai import OpenAI
+from openai import APIConnectionError, APIStatusError, RateLimitError
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from typing import Iterator, Optional, Dict, Any, List
 from siha.config import settings
@@ -38,7 +40,7 @@ class NvidiaClient:
         if max_tokens:
             params["max_tokens"] = max_tokens
         
-        return self.client.chat.completions.create(**params)
+        return self._create_with_retry(params)
     
     def stream(
         self,
@@ -61,7 +63,23 @@ class NvidiaClient:
         if max_tokens:
             params["max_tokens"] = max_tokens
         
-        return self.client.chat.completions.create(**params)
+        return self._create_with_retry(params)
+
+    def _create_with_retry(self, params: Dict[str, Any]):
+        """Create a chat completion with retry/backoff for transient API errors."""
+        last_error = None
+        for attempt in range(settings.max_retries + 1):
+            try:
+                return self.client.chat.completions.create(**params)
+            except (RateLimitError, APIConnectionError, APIStatusError) as e:
+                last_error = e
+                status_code = getattr(e, "status_code", None)
+                if status_code is not None and status_code < 500 and status_code != 429:
+                    raise
+                if attempt >= settings.max_retries:
+                    raise
+                time.sleep(min(2 ** attempt, 8))
+        raise last_error
     
     def extract_reasoning(self, chunk: ChatCompletionChunk) -> Optional[str]:
         """Extract reasoning_content from streaming chunks if available"""

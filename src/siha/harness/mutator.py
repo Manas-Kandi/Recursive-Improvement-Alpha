@@ -33,6 +33,10 @@ class Mutator:
         """Apply a mutation and create a new harness version"""
         
         with get_session() as session:
+            mutation = session.get(Mutation, mutation.id)
+            if not mutation:
+                raise ValueError("Mutation not found")
+
             # Create candidate versions based on mutation kind
             if mutation.kind == MutationKind.prompt:
                 self._apply_prompt_mutation(session, mutation)
@@ -84,7 +88,7 @@ class Mutator:
                 tool.code = mutation.after["code"]
             if "description" in mutation.after:
                 tool.description = mutation.after["description"]
-            tool.version = str(float(tool.version) + 0.1)
+            tool.version = self._next_version(tool.version)
     
     def _apply_strategy_mutation(self, session, mutation: Mutation):
         """Apply a strategy mutation"""
@@ -142,6 +146,9 @@ class Mutator:
         """Rollback a mutation to previous state"""
         
         with get_session() as session:
+            mutation = session.get(Mutation, mutation.id)
+            if not mutation:
+                raise ValueError("Mutation not found")
             mutation.status = MutationStatus.reverted
             mutation.decided_ts = datetime.utcnow()
             
@@ -169,5 +176,23 @@ class Mutator:
     
     def _restore_strategy_parent(self, session, mutation: Mutation):
         """Restore parent strategy"""
-        # Similar to prompt restoration
-        pass
+        strategy = session.query(Strategy).filter(Strategy.id == mutation.target_id).first()
+        if strategy:
+            strategy.status = StrategyStatus.archived
+        key = mutation.before.get("key") or mutation.after.get("key")
+        if key:
+            parent = session.query(Strategy).filter(
+                Strategy.key == key,
+                Strategy.id != mutation.target_id
+            ).order_by(Strategy.id.desc()).first()
+            if parent:
+                parent.status = StrategyStatus.active
+
+    @staticmethod
+    def _next_version(version: str) -> str:
+        """Bump semantic-ish versions without assuming they are floats."""
+        parts = version.split(".")
+        if parts and parts[-1].isdigit():
+            parts[-1] = str(int(parts[-1]) + 1)
+            return ".".join(parts)
+        return f"{version}.1"

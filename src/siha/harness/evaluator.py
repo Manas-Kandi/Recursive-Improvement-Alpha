@@ -52,6 +52,10 @@ class Evaluator:
         """Determine if a mutation should be promoted based on benchmark results"""
         
         with get_session() as session:
+            mutation = session.get(Mutation, mutation.id)
+            if not mutation:
+                return False
+
             # Get the version before and after mutation
             # This is simplified - in production would track version lineage
             current_version = session.query(HarnessVersion).order_by(

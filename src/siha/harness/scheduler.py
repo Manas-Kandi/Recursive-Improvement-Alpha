@@ -102,21 +102,37 @@ class Scheduler:
             pending_mutations = session.query(Mutation).filter(
                 Mutation.status == MutationStatus.pending
             ).all()
-            
-            for mutation in pending_mutations:
-                # Apply mutation temporarily
-                version = self.mutator.apply_mutation(mutation)
-                
-                # Evaluate
-                should_promote = self.evaluator.should_promote(mutation)
-                
+
+            mutation_ids = [m.id for m in pending_mutations]
+
+        for mutation_id in mutation_ids:
+            with get_session() as session:
+                mutation = session.get(Mutation, mutation_id)
+                if not mutation or mutation.status != MutationStatus.pending:
+                    continue
+
+            self.mutator.apply_mutation(mutation)
+            should_promote = self.evaluator.should_promote(mutation)
+
+            with get_session() as session:
+                mutation = session.get(Mutation, mutation_id)
+                if not mutation:
+                    continue
                 if should_promote:
                     mutation.status = MutationStatus.active
+                    session.commit()
                 elif mutation.status != MutationStatus.reverted:
-                    # If not promoted and not reverted, reject
-                    mutation.status = MutationStatus.rejected
-                
-                session.commit()
+                    should_reject = True
+                else:
+                    should_reject = False
+
+            if not should_promote and should_reject:
+                self.mutator.rollback_mutation(mutation)
+                with get_session() as session:
+                    mutation = session.get(Mutation, mutation_id)
+                    if mutation:
+                        mutation.status = MutationStatus.rejected
+                        session.commit()
     
     def trigger_improvement(self):
         """Manually trigger improvement cycle"""

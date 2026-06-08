@@ -7,11 +7,11 @@ Runs commands inside an ephemeral, network-isolated container using the local
 import shutil
 import subprocess
 import tempfile
-import shlex
 import time
 from pathlib import Path
 from typing import Dict, Optional
 from siha.sandbox.base import Sandbox, SandboxResult
+from siha.config import settings
 
 
 class DockerUnavailableError(RuntimeError):
@@ -93,8 +93,8 @@ class DockerSandbox(Sandbox):
             duration_ms = int((time.time() - start_time) * 1000)
             return SandboxResult(
                 success=result.returncode == 0,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                stdout=result.stdout[: settings.max_output_bytes],
+                stderr=result.stderr[: settings.max_output_bytes],
                 exit_code=result.returncode,
                 duration_ms=duration_ms,
             )
