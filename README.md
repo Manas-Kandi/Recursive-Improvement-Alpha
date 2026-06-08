@@ -6,8 +6,10 @@ A self-improving CLI coding agent powered by NVIDIA LLMs — or your own tiny lo
 
 - **Python 3.11+**
 - **Node.js 18+** (for the developer portal UI)
-- **NVIDIA API key** — get one free at [build.nvidia.com](https://build.nvidia.com) *(only if using cloud models)*
 - **Git**
+- Optional: [Ollama](https://ollama.com) (for Ollama-backed local models)
+- Optional: `pip install -e ".[local]"` (for in-process tiny GGUF models — no external server needed)
+- Optional: **NVIDIA API key** — get one free at [build.nvidia.com](https://build.nvidia.com) *(only needed for cloud models)*
 - Optional: Docker (for sandboxed code execution)
 
 ## Quick Start
@@ -33,7 +35,7 @@ siha init-db
 siha
 ```
 
-On first run the app auto-downloads a ~400 MB Qwen2.5-Coder-0.5B GGUF model to `~/.cache/siha/models`.
+On first run the app auto-downloads a ~400 MB Qwen2.5-Coder-0.5B GGUF model to `~/.cache/siha/models`. If you skip the `[local]` extra, the menu will still work but the in-process local option will be unavailable.
 
 ### Option B — With NVIDIA cloud model
 
@@ -71,7 +73,10 @@ That's it. The `siha` command is available anywhere inside the activated venv.
 
 | Command | What it does |
 |---|---|
+| `siha` | Interactive main menu — pick your provider and action |
 | `siha chat` | Interactive coding session with full conversational context |
+| `siha chat --provider local` | Chat using the in-process tiny model |
+| `siha chat --provider ollama` | Chat using an Ollama server |
 | `siha portal` | Launch the developer portal (backend + UI, auto-installs npm deps) |
 | `siha bench` | Run the benchmark suite |
 | `siha improve` | Manually trigger one self-improvement cycle |
@@ -112,6 +117,8 @@ All options live in `.env`:
 | `OLLAMA_MODEL` | `qwen2.5-coder:0.5b` | Default Ollama model tag |
 | `LOCAL_MODEL_REPO` | `Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF` | HuggingFace repo for in-process model |
 | `LOCAL_MODEL_FILE` | `qwen2.5-coder-0.5b-instruct-q4_k_m.gguf` | GGUF filename to download |
+| `LOCAL_MODEL_CONTEXT_SIZE` | `4096` | Context window for the local model |
+| `LOCAL_MODEL_N_THREADS` | `0` | CPU threads for local model (`0` = auto) |
 | `PORTAL_DEV_TOKEN` | `dev` | Portal auth token |
 | `SEARCH_API_KEY` | — | Tavily/Brave key (enables `web_search` tool) |
 | `STEP_BUDGET` | `50` | Max agent steps per task |
@@ -149,7 +156,7 @@ portal-web/       # React + Vite frontend for the developer portal
 ## Testing
 
 ```bash
-pip install -e ".[test]"
+pip install -e ".[test,local]"
 pytest
 ```
 
