@@ -2,6 +2,7 @@
 
 import json
 import time
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from siha.llm.client import NvidiaClient
 from siha.db import get_session
@@ -23,7 +24,12 @@ class AgentLoop:
         self.registry = ToolRegistry()
         self.sandbox = None
 
-    def run(self, user_prompt: str, sandbox_mode: str = "local") -> Task:
+    def run(
+        self,
+        user_prompt: str,
+        sandbox_mode: str = "local",
+        workspace_dir: Optional[Path] = None,
+    ) -> Task:
         """Run the agent loop for a user prompt"""
         from siha.config import settings
 
@@ -45,7 +51,7 @@ class AgentLoop:
         event_bus.publish("task_started", {"task_id": task_id, "prompt": user_prompt})
 
         # Bind a shared per-task sandbox to all tools.
-        self.sandbox = create_sandbox(sandbox_mode)
+        self.sandbox = create_sandbox(sandbox_mode, workspace_dir=workspace_dir)
         self.registry.set_sandbox(self.sandbox)
 
         # Build initial messages

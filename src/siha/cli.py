@@ -1,5 +1,6 @@
 """Typer CLI interface"""
 
+from pathlib import Path
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -23,13 +24,17 @@ def init_db():
 @app.command()
 def chat(
     model: str = typer.Option(None, "--model", "-m", help="Model to use"),
-    sandbox: str = typer.Option("local", "--sandbox", "-s", help="Sandbox mode: local or docker")
+    sandbox: str = typer.Option("local", "--sandbox", "-s", help="Sandbox mode: local or docker"),
+    workspace: Path = typer.Option(Path.cwd(), "--workspace", "-w", help="Folder the agent may read/write")
 ):
     """Interactive chat with the coding agent"""
+    workspace = workspace.expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
     console.print(Panel.fit(
         f"[bold]Self-Improving Harness[/bold]\n"
         f"Model: {model or settings.agent_model}\n"
         f"Sandbox: {sandbox}\n"
+        f"Workspace: {workspace}\n"
         f"Type 'exit' to quit",
         title="SIHA Chat"
     ))
@@ -49,7 +54,7 @@ def chat(
             
             console.print("[bold magenta]Agent:[/bold magenta] Thinking...")
             
-            task = agent.run(user_input, sandbox_mode=sandbox)
+            task = agent.run(user_input, sandbox_mode=sandbox, workspace_dir=workspace)
             
             color = "green" if task.status == "success" else "red"
             console.print(f"[{color}]Task {task.status} in {task.duration_ms}ms[/{color}]")

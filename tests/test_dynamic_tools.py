@@ -35,6 +35,17 @@ def test_shared_sandbox_write_then_read():
     assert "quotes" in read_result.output
 
 
+def test_write_file_tool_blocks_workspace_escape(tmp_path):
+    sandbox = create_sandbox("local", workspace_dir=tmp_path / "workspace")
+    writer = WriteFileTool(sandbox=sandbox)
+
+    result = writer.run(path="../escape.txt", content="bad")
+
+    assert not result.success
+    assert "escapes sandbox workspace" in result.error
+    assert not (tmp_path / "escape.txt").exists()
+
+
 def test_dynamic_tool_executes_run_function():
     code = "def run(**kwargs):\n    return kwargs.get('a', 0) + kwargs.get('b', 0)\n"
     tool = DynamicTool(

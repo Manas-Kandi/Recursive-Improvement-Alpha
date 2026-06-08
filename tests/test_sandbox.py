@@ -44,3 +44,25 @@ def test_sandbox_cleanup():
     sandbox.cleanup()
     
     assert not temp_dir.exists()
+
+
+def test_persistent_workspace_not_cleaned(tmp_path):
+    """Test persistent workspaces keep generated files after cleanup"""
+    workspace = tmp_path / "workspace"
+    sandbox = LocalSandbox(workspace_dir=workspace)
+
+    result = sandbox.run("echo hello > hello.txt")
+    sandbox.cleanup()
+
+    assert result.success == True
+    assert workspace.exists()
+    assert (workspace / "hello.txt").read_text().strip() == "hello"
+
+
+def test_persistent_workspace_blocks_file_escape(tmp_path):
+    """Test file injection cannot write outside persistent workspace"""
+    workspace = tmp_path / "workspace"
+    sandbox = LocalSandbox(workspace_dir=workspace)
+
+    with pytest.raises(ValueError):
+        sandbox.run("true", files={"../escape.txt": "bad"})

@@ -27,6 +27,12 @@ class SandboxTool(Tool):
     def sandbox(self, value: Sandbox):
         self._sandbox = value
 
+    def resolve_path(self, path: str) -> str:
+        resolver = getattr(self.sandbox, "resolve_path", None)
+        if callable(resolver):
+            return str(resolver(path))
+        return path
+
 
 class RunPythonTool(SandboxTool):
     """Execute Python code in the sandbox"""
@@ -125,7 +131,11 @@ class ReadFileTool(SandboxTool):
     
     def run(self, **kwargs) -> ToolResult:
         path = kwargs.get("path", "")
-        result = self.sandbox.run(f"cat {shlex.quote(path)}")
+        try:
+            resolved_path = self.resolve_path(path)
+        except ValueError as e:
+            return ToolResult(success=False, output="", error=str(e), data={"path": path})
+        result = self.sandbox.run(f"cat {shlex.quote(resolved_path)}")
         if result.success:
             return ToolResult(
                 success=True,
@@ -172,8 +182,12 @@ class WriteFileTool(SandboxTool):
     def run(self, **kwargs) -> ToolResult:
         path = kwargs.get("path", "")
         content = kwargs.get("content", "")
+        try:
+            resolved_path = self.resolve_path(path)
+        except ValueError as e:
+            return ToolResult(success=False, output="", error=str(e), data={"path": path})
         result = self.sandbox.run(
-            f"mkdir -p $(dirname {shlex.quote(path)}) && cp __siha_write__ {shlex.quote(path)}",
+            f"mkdir -p $(dirname {shlex.quote(resolved_path)}) && cp __siha_write__ {shlex.quote(resolved_path)}",
             files={"__siha_write__": content},
         )
         if result.success:
@@ -217,7 +231,11 @@ class ListDirTool(SandboxTool):
     
     def run(self, **kwargs) -> ToolResult:
         path = kwargs.get("path", ".")
-        result = self.sandbox.run(f"ls -la {shlex.quote(path)}")
+        try:
+            resolved_path = self.resolve_path(path)
+        except ValueError as e:
+            return ToolResult(success=False, output="", error=str(e), data={"path": path})
+        result = self.sandbox.run(f"ls -la {shlex.quote(resolved_path)}")
         if result.success:
             return ToolResult(
                 success=True,
