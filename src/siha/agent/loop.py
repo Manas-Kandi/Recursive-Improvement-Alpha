@@ -11,6 +11,7 @@ from siha.models import Task, Step, StepType, TaskStatus, TaskCategory, ToolCall
 from siha.tools.registry import ToolRegistry
 from siha.sandbox import create_sandbox
 from siha.portal.events import event_bus
+from siha.agent.router import IntentRouter
 
 
 class AgentLoop:
@@ -68,12 +69,25 @@ class AgentLoop:
             task_id = self.task.id
         event_bus.publish("task_started", {"task_id": task_id, "prompt": user_prompt, "trace_id": resolved_trace_id})
 
-        # Bind a shared per-task sandbox to all tools.
+        # --- Intent Routing ---
+        # A lightweight model classifies the intent so small models can
+        # reliably distinguish chat from tool-use without confusing the
+        # main execution model.
+        router = IntentRouter()
+        intent = router.classify(user_prompt)
+        _emit("intent_classified", {"intent": intent})
+        event_bus.publish("intent_classified", {"task_id": task_id, "intent": intent})
+
+        # For pure chat, skip the tool loop entirely and do a single response.
+        if intent == "chat":
+            return self._run_chat_mode(user_prompt, task_id, history, _emit, start_time)
+
+        # Tool-using modes: bind sandbox and enter the ReAct loop.
         self.sandbox = create_sandbox(sandbox_mode, workspace_dir=workspace_dir)
         self.registry.set_sandbox(self.sandbox)
 
         # Build initial messages — inject prior conversation turns for context
-        messages: List[Dict[str, Any]] = [{"role": "system", "content": self._get_system_prompt()}]
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": self._get_system_prompt(intent)}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": user_prompt})
@@ -289,7 +303,50 @@ class AgentLoop:
             }
         return None
 
-    def _get_system_prompt(self) -> str:
+    def _run_chat_mode(
+        self,
+        user_prompt: str,
+        task_id: int,
+        history: Optional[List[Dict[str, Any]]],
+        _emit: Callable[[str, Dict[str, Any]], None],
+        start_time: float,
+    ) -> Task:
+        """Fast path for pure chat: single LLM call, no tools, no loop."""
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": "You are a helpful coding assistant."}
+        ]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": user_prompt})
+
+        _emit("thinking_start", {"step": 0, "mode": "chat"})
+        content_parts: List[str] = []
+        for chunk in self.client.stream(messages):
+            if chunk.choices and chunk.choices[0].delta.content:
+                token = chunk.choices[0].delta.content
+                content_parts.append(token)
+                _emit("content_token", {"token": token, "step": 0})
+
+        final_answer = "".join(content_parts)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        with get_session() as session:
+            task = session.get(Task, task_id)
+            task.status = TaskStatus.success
+            task.duration_ms = duration_ms
+            task.final_answer = final_answer
+            session.commit()
+            session.refresh(task)
+            self.task = task
+
+        event_bus.publish(
+            "task_finished",
+            {"task_id": task_id, "status": "success", "duration_ms": duration_ms},
+        )
+        _emit("final_answer", {"content": final_answer})
+        return self.task
+
+    def _get_system_prompt(self, intent: Optional[str] = None) -> str:
         """Get the active system prompt from the DB, falling back to a default."""
         from siha.agent.prompts import get_active_prompt
         from siha.models import PromptRole
@@ -302,17 +359,28 @@ class AgentLoop:
         for name, tool in self.registry.tools.items():
             tool_list.append(f"- {name}: {tool.description}")
 
+        # Tailor the prompt slightly based on classified intent
+        intent_guidance = ""
+        if intent == "code_generation":
+            intent_guidance = (
+                "The user wants you to WRITE code. Use write_file to create the "
+                "files, then use run_shell or run_python to verify they work.\n"
+            )
+        elif intent == "analysis":
+            intent_guidance = (
+                "The user wants you to ANALYZE something. Use read_file to inspect "
+                "code, then explain your findings.\n"
+            )
+
         return (
             "You are a helpful coding assistant with access to tools.\n\n"
-            "RULES:\n"
-            "1. For greetings, chitchat, or simple questions, just reply in plain text.\n"
-            "   NEVER output JSON or call tools for these.\n"
-            "2. When the user asks you to DO something (create a file, run code,\n"
-            "   search the web, read a file, etc.), you MUST use the appropriate tool.\n"
+            + intent_guidance
+            + "RULES:\n"
+            "1. When the user asks you to DO something, you MUST use the appropriate tool.\n"
             "   Do NOT explain how to do it — actually DO it via a tool call.\n"
-            "3. When a tool IS needed, output EXACTLY one JSON object and nothing else:\n"
+            "2. When a tool IS needed, output EXACTLY one JSON object and nothing else:\n"
             '   {"tool": "TOOL_NAME", "arguments": {"arg1": "value1"}}\n'
-            "4. After receiving a tool result, continue the task or give a final answer.\n\n"
+            "3. After receiving a tool result, continue the task or give a final answer.\n\n"
             "EXAMPLE:\n"
             'User: "Create a file hello.txt with Hello World inside"\n'
             'WRONG: "Here is how you can create the file..."  (do NOT do this)\n'
