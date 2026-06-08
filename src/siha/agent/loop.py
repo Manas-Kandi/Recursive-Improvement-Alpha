@@ -12,6 +12,7 @@ from siha.tools.registry import ToolRegistry
 from siha.sandbox import create_sandbox
 from siha.portal.events import event_bus
 from siha.agent.router import IntentRouter
+from siha.agent.planner import TaskPlanner
 
 
 class AgentLoop:
@@ -86,13 +87,61 @@ class AgentLoop:
         self.sandbox = create_sandbox(sandbox_mode, workspace_dir=workspace_dir)
         self.registry.set_sandbox(self.sandbox)
 
+        tools = self.registry.to_openai_tools()
+
         # Build initial messages — inject prior conversation turns for context
         messages: List[Dict[str, Any]] = [{"role": "system", "content": self._get_system_prompt(intent)}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": user_prompt})
 
-        tools = self.registry.to_openai_tools()
+        # --- Planner pre-step ---
+        # Plan the first concrete tool call and execute it immediately.
+        # Injecting a completed tool turn means the main model starts from
+        # "tool already ran" rather than "should I do this?" — bypassing the
+        # model's tendency to say "I can't do that."
+        planner = TaskPlanner(provider=self.client.__class__.__name__.lower().replace("client", "") or None,
+                              model=self.client.model)
+        first_step = planner.plan_first_step(user_prompt, tools)
+        if first_step:
+            tool_name = first_step["function"]["name"]
+            tool_args = self._parse_args(first_step["function"]["arguments"])
+            _emit("plan_step", {"tool": tool_name, "args": tool_args})
+
+            exec_start = time.time()
+            tool_result = self._execute_tool(tool_name, tool_args)
+            tool_duration_ms = int((time.time() - exec_start) * 1000)
+            self._record_tool_call(tool_name, tool_args, tool_result, tool_duration_ms)
+
+            content = tool_result.output or tool_result.error or ""
+            self._record_step(
+                StepType.tool_call,
+                {"tool_calls": [first_step], "planned": True},
+                0,
+                tool_duration_ms,
+            )
+            self._record_step(
+                StepType.observation,
+                {"tool": tool_name, "success": tool_result.success,
+                 "output": tool_result.output, "error": tool_result.error},
+                0,
+                tool_duration_ms,
+            )
+            _emit("tool_result", {
+                "tool": tool_name, "success": tool_result.success,
+                "output": (tool_result.output or "")[:300],
+                "error": tool_result.error, "duration_ms": tool_duration_ms,
+            })
+            messages.append({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [first_step],
+            })
+            messages.append({
+                "role": "tool",
+                "tool_call_id": first_step["id"],
+                "content": content[:settings.max_output_bytes],
+            })
 
         final_answer: Optional[str] = None
         error_summary: Optional[str] = None
