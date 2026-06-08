@@ -17,14 +17,27 @@ import type {
 } from './types'
 
 const API_BASE = '/api'
-const AUTH_TOKEN = localStorage.getItem('siha_token') || 'dev'
 
 const api = axios.create({
   baseURL: API_BASE,
-  headers: {
-    'Authorization': `Bearer ${AUTH_TOKEN}`
-  }
 })
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('siha_token') || 'dev'
+  config.headers.set('Authorization', `Bearer ${token}`)
+  return config
+})
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      localStorage.removeItem('siha_token')
+      window.location.reload()
+    }
+    return Promise.reject(error)
+  }
+)
 
 export const apiClient = {
   getSessions: (): Promise<AxiosResponse<SessionItem[]>> =>

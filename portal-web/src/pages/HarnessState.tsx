@@ -1,13 +1,8 @@
 import { useState, useEffect } from 'react'
 import { apiClient } from '../api'
+import type { HarnessState } from '../types'
 
-interface HarnessState {
-  prompts: any[]
-  tools: any[]
-  strategies: any[]
-}
-
-export default function HarnessState() {
+export default function HarnessStatePage() {
   const [state, setState] = useState<HarnessState | null>(null)
   const [loading, setLoading] = useState(true)
 

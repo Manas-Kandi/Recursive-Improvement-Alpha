@@ -1,23 +1,9 @@
 import { useState, useEffect } from 'react'
 import { apiClient } from '../api'
-
-interface Session {
-  id: number
-  prompt: string
-  model: string
-  status: string
-  duration_ms: number
-  ts: string
-}
-
-interface SessionDetail {
-  task: Session
-  steps: any[]
-  tool_calls: any[]
-}
+import type { SessionItem, SessionDetail } from '../types'
 
 export default function Sessions() {
-  const [sessions, setSessions] = useState<Session[]>([])
+  const [sessions, setSessions] = useState<SessionItem[]>([])
   const [selectedSession, setSelectedSession] = useState<SessionDetail | null>(null)
   const [loading, setLoading] = useState(true)
 
