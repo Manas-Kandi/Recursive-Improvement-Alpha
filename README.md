@@ -1,162 +1,123 @@
-# Self-Improving Harness (SIHA)
+# ✦ 9xf-code
 
-A Python CLI coding agent powered by switchable NVIDIA LLMs that plans, writes, and executes code to fulfill user prompts, while a background self-improvement harness analyzes every run to evolve its own prompts, tool library, execution strategy, and benchmarks.
+A self-improving CLI coding agent powered by NVIDIA LLMs. It plans, writes, and executes code to fulfill your prompts — and runs a background harness that analyzes every session to evolve its own prompts, tools, and strategies over time.
 
-## Features
+## Prerequisites
 
-- **Multi-model support**: NVIDIA Nemotron-3, Kimi-K2.6, Gemma-3N
-- **Auto-discovery**: Automatically discovers and validates new tools
-- **Self-improvement**: Analyzes runs to improve prompts, tools, and strategies
-- **Benchmark-driven**: All improvements validated against benchmark suite
-- **Developer portal**: FastAPI + React dashboard for monitoring
-- **Sandbox execution**: Safe code execution in isolated environments
-- **Version control**: Full audit trail with rollback capability
+- **Python 3.11+**
+- **Node.js 18+** (for the developer portal UI)
+- **NVIDIA API key** — get one free at [build.nvidia.com](https://build.nvidia.com)
+- **Git**
+- Optional: Docker (for sandboxed code execution)
 
-## Quick Start
+## Setup — from a fresh folder
 
-### Prerequisites
-
-- Python 3.11+
-- NVIDIA API key (get from [NVIDIA NGC](https://catalog.ngc.nvidia.com/))
-- Optional: Docker (for containerized sandbox)
-
-### Installation
-
-1. Clone the repository:
 ```bash
+# 1. Clone
 git clone <repository-url>
 cd Self-Improving-Harness
-```
 
-2. Create a virtual environment:
-```bash
+# 2. Create and activate a virtual environment
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+source venv/bin/activate        # Windows: venv\Scripts\activate
 
-3. Install dependencies:
-```bash
+# 3. Install the package and all Python dependencies
 pip install -e .
-```
 
-4. Configure environment:
-```bash
+# 4. Add your API key
 cp .env.example .env
-# Edit .env with your NVIDIA_API_KEY
-```
+#    Open .env and set NVIDIA_API_KEY=<your key>
 
-5. Initialize database:
-```bash
+# 5. Initialize the database (creates siha.db on first run)
 siha init-db
-```
 
-### Usage
-
-#### Interactive Chat
-```bash
+# 6. Start chatting
 siha chat
 ```
-Options:
-- `--model` or `-m`: Select model (default: nvidia/nemotron-3-ultra-550b-a55b)
-- `--sandbox` or `-s`: Sandbox mode (local|docker, default: local)
 
-#### Run Benchmarks
+That's it. The `siha` command is available anywhere inside the activated venv.
+
+---
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `siha chat` | Interactive coding session with full conversational context |
+| `siha portal` | Launch the developer portal (backend + UI, auto-installs npm deps) |
+| `siha bench` | Run the benchmark suite |
+| `siha improve` | Manually trigger one self-improvement cycle |
+| `siha init-db` | Create / migrate the SQLite database |
+
+### Chat options
 ```bash
-siha bench
+siha chat --model nvidia/llama-3.1-nemotron-ultra-253b-v1  # override model
+siha chat --sandbox docker                                   # isolated execution
+siha chat --workspace ~/my-project                          # set working directory
 ```
 
-#### Trigger Self-Improvement
-```bash
-siha improve
-```
+Inside chat, type `clear` to reset conversational context, `exit` to quit.
 
-#### Launch Developer Portal
+### Developer Portal
 ```bash
 siha portal
 ```
-Then open http://localhost:8000 in your browser. Use the token from `.env` for authentication.
+Opens the backend on **port 8000** and the React UI on **http://localhost:3000**.  
+On first run, npm dependencies are installed automatically — no separate `npm install` needed.  
+Auth token defaults to `dev` (set `PORTAL_DEV_TOKEN` in `.env` to change it).
 
-### Portal Frontend
-
-The React frontend is in `portal-web/`:
-
-```bash
-cd portal-web
-npm install
-npm run dev
-```
-
-The frontend will be available at http://localhost:3000.
-
-## Architecture
-
-### Core Components
-
-- **LLM Client** (`src/siha/llm/`): NVIDIA API wrapper with streaming support
-- **Agent Loop** (`src/siha/agent/`): ReAct-style planning and execution
-- **Tool Framework** (`src/siha/tools/`): Extensible tool system with auto-discovery
-- **Sandbox** (`src/siha/sandbox/`): Isolated execution environments
-- **Harness** (`src/siha/harness/`): Self-improvement analysis and mutation
-- **Benchmarks** (`src/siha/benchmarks/`): Test suite and trend tracking
-- **Portal** (`src/siha/portal/`): FastAPI backend + React frontend
-
-### Data Model
-
-- **Task**: User prompts and execution results
-- **Step**: Individual agent actions (plan, tool_call, observation)
-- **Tool**: Available tools with implementations
-- **Prompt**: System prompts for different roles
-- **Strategy**: Configuration parameters
-- **Mutation**: Proposed and applied changes
-- **Benchmark**: Test specifications
-- **HarnessVersion**: Snapshots for rollback
-
-## Self-Improvement Process
-
-1. **Analysis**: After each task, the meta LLM analyzes the execution trace
-2. **Proposal**: Mutations are proposed for prompts, tools, or strategies
-3. **Validation**: Mutations are tested against the benchmark suite
-4. **Promotion**: Improvements that meet the threshold are auto-promoted
-5. **Rollback**: Regressions are automatically reverted
+---
 
 ## Configuration
 
-Environment variables in `.env`:
+All options live in `.env`:
 
-- `NVIDIA_API_KEY`: Required NVIDIA API key
-- `SEARCH_API_KEY`: Optional Tavily API key enabling the `web_search` tool
-- `PORTAL_DEV_TOKEN`: Portal authentication token (default: dev)
-- `REQUIRE_HUMAN_APPROVAL`: Force manual approval (default: false)
-- `IMPROVE_INTERVAL_S`: Background improvement interval (default: 300)
-- `BENCHMARK_PROMOTE_THRESHOLD`: Improvement threshold (default: 0.05)
-- `STEP_BUDGET`: Max agent steps per task (default: 50)
-- `TIMEOUT_S`: Execution timeout (default: 120)
-- `SANDBOX_DEFAULT`: Default sandbox mode (default: local)
+| Variable | Default | Description |
+|---|---|---|
+| `NVIDIA_API_KEY` | — | **Required.** Your NVIDIA API key |
+| `AGENT_MODEL` | `nvidia/nemotron-3-ultra-550b-a55b` | Model used for chat |
+| `META_MODEL` | same | Model used for self-improvement analysis |
+| `PORTAL_DEV_TOKEN` | `dev` | Portal auth token |
+| `SEARCH_API_KEY` | — | Tavily/Brave key (enables `web_search` tool) |
+| `STEP_BUDGET` | `50` | Max agent steps per task |
+| `TIMEOUT_S` | `120` | Tool execution timeout |
+| `SANDBOX_DEFAULT` | `local` | `local` or `docker` |
+| `REQUIRE_HUMAN_APPROVAL` | `false` | Gate self-improvement mutations behind manual approval |
+| `IMPROVE_INTERVAL_S` | `300` | Background improvement cycle interval (seconds) |
+
+---
+
+## Architecture
+
+```
+src/siha/
+├── agent/        # ReAct loop, prompts, session management
+├── llm/          # NVIDIA API client (streaming + tool calls)
+├── tools/        # Built-in tools, dynamic tool loading, registry
+├── sandbox/      # Local + Docker execution environments
+├── harness/      # Self-improvement: analyzer, mutator, evaluator, scheduler
+├── benchmarks/   # Benchmark suite and trend tracking
+├── portal/       # FastAPI backend (REST + SSE)
+└── cli.py        # Typer CLI — entry point for all commands
+
+portal-web/       # React + Vite frontend for the developer portal
+```
+
+## Self-Improvement Loop
+
+1. After each task, the meta-model analyzes the execution trace
+2. It proposes mutations to prompts, tools, or strategy parameters
+3. Mutations are validated against the benchmark suite
+4. Those that improve score by ≥ `BENCHMARK_PROMOTE_THRESHOLD` are auto-promoted
+5. Regressions are automatically rolled back
 
 ## Testing
 
-Run tests:
 ```bash
 pip install -e ".[test]"
 pytest
 ```
 
-## Development
-
-### Adding New Tools
-
-1. Create a tool class inheriting from `Tool` in `src/siha/tools/builtin.py`
-2. Implement `name`, `description`, `parameters`, and `run` methods
-3. Add to `BUILTIN_TOOLS` list
-
-### Adding Benchmarks
-
-Edit `src/siha/benchmarks/runner.py` and add to the `benchmarks` list in `seed_benchmarks()`.
-
 ## License
 
-MIT License
-
-## Contributing
-
-Contributions welcome! Please read the architecture documentation in `.windsurf/plans/` before making changes.
+MIT
