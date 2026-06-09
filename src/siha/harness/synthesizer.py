@@ -35,6 +35,12 @@ _TOKEN_GROUP = r'([\w\-./]+)'
 # Capture group used for free-text values (content, queries).
 _TEXT_GROUP = r'(.+)'
 
+# Tokens shorter than this or in this set are skipped during token-level generalization.
+_STOP_WORDS = {
+    "a", "an", "the", "to", "of", "in", "on", "at", "is", "it",
+    "and", "or", "for", "with", "as", "by", "from", "up", "down",
+}
+
 
 class TemplateSynthesizer:
     """Generalizes successful planner-sourced tool calls into action templates."""
@@ -198,28 +204,52 @@ class TemplateSynthesizer:
 
         Each string argument value found inside the prompt is replaced by a
         capture group; the args template references groups via {n} placeholders.
-        Returns None when no argument value appears in the prompt (the request
-        is not generalizable by substitution).
+        When the whole value is not present, individual tokens are searched and
+        generalised.  Returns None when no argument value appears in the prompt.
         """
         prompt_lower = prompt.lower()
 
-        # Locate each string arg value inside the prompt (longest values first
-        # so nested values don't shadow each other).
-        locations: List[Tuple[int, int, str, str]] = []  # (start, end, arg_key, value)
+        locations: List[Tuple[int, int, str, str]] = []  # (start, end, arg_key, token)
         claimed: List[Tuple[int, int]] = []
+        whole_replaced_keys: set = set()
+        token_group_map: Dict[str, Dict[str, int]] = {}  # arg_key -> token -> group_num
+
         arg_items = sorted(
             ((k, v) for k, v in tool_args.items() if isinstance(v, str) and v.strip()),
             key=lambda kv: -len(kv[1]),
         )
         for key, value in arg_items:
-            idx = prompt_lower.find(value.lower().strip())
-            if idx < 0:
+            value_lower = value.lower().strip()
+
+            # 1) Whole-value match
+            idx = prompt_lower.find(value_lower)
+            if idx >= 0:
+                span = (idx, idx + len(value_lower))
+                if not any(span[0] < c[1] and c[0] < span[1] for c in claimed):
+                    claimed.append(span)
+                    locations.append((span[0], span[1], key, value_lower))
+                    whole_replaced_keys.add(key)
                 continue
-            span = (idx, idx + len(value.strip()))
-            if any(span[0] < c[1] and c[0] < span[1] for c in claimed):
-                continue
-            claimed.append(span)
-            locations.append((span[0], span[1], key, value.strip()))
+
+            # 2) Token-level fallback
+            original_tokens = value.strip().split()
+            found_tokens: Dict[str, int] = {}
+            for token in original_tokens:
+                token_clean = token.strip(".,;:!?").lower()
+                if len(token_clean) < 3 or token_clean in _STOP_WORDS:
+                    continue
+                tidx = prompt_lower.find(token_clean)
+                if tidx < 0:
+                    continue
+                span = (tidx, tidx + len(token_clean))
+                if any(span[0] < c[1] and c[0] < span[1] for c in claimed):
+                    continue
+                claimed.append(span)
+                locations.append((span[0], span[1], key, token_clean))
+                found_tokens[token] = len(locations)
+
+            if found_tokens:
+                token_group_map[key] = found_tokens
 
         if not locations:
             return None
@@ -228,14 +258,17 @@ class TemplateSynthesizer:
         locations.sort(key=lambda loc: loc[0])
         pattern_parts: List[str] = []
         group_for_key: Dict[str, int] = {}
+        token_to_group: Dict[Tuple[str, str], int] = {}
         cursor = 0
-        for group_idx, (start, end, key, value) in enumerate(locations, start=1):
+        for group_idx, (start, end, key, token) in enumerate(locations, start=1):
             literal = prompt_lower[cursor:start]
             pattern_parts.append(TemplateSynthesizer._flexible_escape(literal))
-            # Token-like values get a tight group; free text gets a greedy one.
-            group = _TOKEN_GROUP if re.fullmatch(r"[\w\-./]+", value) else _TEXT_GROUP
+            group = _TOKEN_GROUP if re.fullmatch(r"[\w\-./]+", token) else _TEXT_GROUP
             pattern_parts.append(group)
-            group_for_key[key] = group_idx
+            if key in whole_replaced_keys:
+                group_for_key[key] = group_idx
+            else:
+                token_to_group[(key, token)] = group_idx
             cursor = end
         pattern_parts.append(TemplateSynthesizer._flexible_escape(prompt_lower[cursor:]))
 
@@ -253,8 +286,16 @@ class TemplateSynthesizer:
 
         args_template: Dict[str, Any] = {}
         for key, value in tool_args.items():
-            if key in group_for_key:
+            if key in whole_replaced_keys:
                 args_template[key] = f"{{{group_for_key[key]}}}"
+            elif key in token_group_map:
+                rendered = str(value)
+                for orig_token, _ in token_group_map[key].items():
+                    token_clean = orig_token.lower().strip(".,;:!?")
+                    group_num = token_to_group.get((key, token_clean))
+                    if group_num is not None:
+                        rendered = rendered.replace(orig_token, f"{{{group_num}}}")
+                args_template[key] = rendered
             else:
                 args_template[key] = value
 
