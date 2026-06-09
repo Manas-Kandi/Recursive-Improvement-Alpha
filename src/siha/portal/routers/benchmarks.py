@@ -47,7 +47,7 @@ def run_all_benchmarks(token: str = Depends(verify_auth)):
         benchmarks = session.query(Benchmark).all()
     results = []
     for benchmark in benchmarks:
-        run = runner.run_benchmark(benchmark, 1)
+        run = runner.run_benchmark(benchmark, None)
         results.append({
             "name": benchmark.name,
             "score": run.score,

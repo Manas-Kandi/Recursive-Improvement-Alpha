@@ -2,7 +2,7 @@
 
 from sqlmodel import SQLModel, Field, Relationship, JSON, Column
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -81,7 +81,7 @@ class BenchmarkOrigin(str, Enum):
 
 class Task(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    ts: datetime = Field(default_factory=datetime.utcnow)
+    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     user_prompt: str = Field(index=True)
     model: str
     status: TaskStatus = Field(default=TaskStatus.running)
@@ -120,7 +120,7 @@ class Tool(SQLModel, table=True):
     code: Optional[str] = None
     source_url: Optional[str] = None
     status: ToolStatus = ToolStatus.active
-    created_ts: datetime = Field(default_factory=datetime.utcnow)
+    created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ToolCall(SQLModel, table=True):
@@ -142,7 +142,7 @@ class Prompt(SQLModel, table=True):
     text: str
     status: PromptStatus = PromptStatus.active
     parent_id: Optional[int] = None
-    created_ts: datetime = Field(default_factory=datetime.utcnow)
+    created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Strategy(SQLModel, table=True):
@@ -151,7 +151,7 @@ class Strategy(SQLModel, table=True):
     value: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     version: str
     status: StrategyStatus = StrategyStatus.active
-    created_ts: datetime = Field(default_factory=datetime.utcnow)
+    created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Mutation(SQLModel, table=True):
@@ -166,7 +166,7 @@ class Mutation(SQLModel, table=True):
     benchmark_delta: Optional[float] = None
     base_version_id: Optional[int] = Field(default=None)
     candidate_version_id: Optional[int] = Field(default=None)
-    created_ts: datetime = Field(default_factory=datetime.utcnow)
+    created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     decided_ts: Optional[datetime] = None
 
 
@@ -177,7 +177,7 @@ class Benchmark(SQLModel, table=True):
     task_spec: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     assertion: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     origin: BenchmarkOrigin = BenchmarkOrigin.seed
-    created_ts: datetime = Field(default_factory=datetime.utcnow)
+    created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     runs: List["BenchmarkRun"] = Relationship(back_populates="benchmark")
 
@@ -185,19 +185,19 @@ class Benchmark(SQLModel, table=True):
 class BenchmarkRun(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     benchmark_id: int = Field(foreign_key="benchmark.id")
-    harness_version: int
+    harness_version: int = Field(foreign_key="harnessversion.id")
     passed: bool
     score: float
     duration_ms: int
     output: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    ts: datetime = Field(default_factory=datetime.utcnow)
+    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     benchmark: Benchmark = Relationship(back_populates="runs")
 
 
 class HarnessVersion(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    ts: datetime = Field(default_factory=datetime.utcnow)
+    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     label: str
     prompt_set: List[int] = Field(default_factory=list, sa_column=Column(JSON))
     tool_set: List[int] = Field(default_factory=list, sa_column=Column(JSON))

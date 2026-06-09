@@ -66,10 +66,10 @@ class DockerSandbox(Sandbox):
             )
 
         if files:
-            for file_path, file_content in files.items():
-                full_path = self.resolve_path(file_path)
+            for file_path, content in files.items():
+                full_path = self.temp_dir / file_path
                 full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text(file_content)
+                full_path.write_text(content)
 
         docker_cmd = [
             "docker", "run", "--rm",
@@ -118,16 +118,6 @@ class DockerSandbox(Sandbox):
                 duration_ms=duration_ms,
                 error=str(e),
             )
-
-    def resolve_path(self, file_path: str) -> Path:
-        """Resolve a file path and ensure it stays inside the sandbox root."""
-        if not self.temp_dir:
-            self._create_temp_dir()
-        root = self.temp_dir.resolve()
-        resolved = (root / file_path).resolve()
-        if resolved != root and root not in resolved.parents:
-            raise ValueError(f"Path escapes sandbox workspace: {file_path}")
-        return resolved
 
     def cleanup(self):
         if self.temp_dir and self.temp_dir.exists():

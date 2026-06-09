@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from siha.config import settings
-from siha.portal.routers import sessions, harness, mutations, benchmarks, tools, run, stream
+from siha.portal.routers import sessions, harness, mutations, benchmarks, tools, run, stream, improve
 
 app = FastAPI(title="SIHA Portal")
 
@@ -45,3 +45,4 @@ app.include_router(benchmarks.router)
 app.include_router(tools.router)
 app.include_router(run.router)
 app.include_router(stream.router)
+app.include_router(improve.router)

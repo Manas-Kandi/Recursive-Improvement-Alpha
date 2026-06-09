@@ -66,3 +66,13 @@ def test_persistent_workspace_blocks_file_escape(tmp_path):
 
     with pytest.raises(ValueError):
         sandbox.run("true", files={"../escape.txt": "bad"})
+
+
+def test_docker_sandbox_blocks_file_escape(tmp_path):
+    """Test DockerSandbox file injection cannot write outside temp dir."""
+    from siha.sandbox.docker import DockerSandbox
+
+    sandbox = DockerSandbox()
+    with pytest.raises(ValueError, match="escapes sandbox workspace"):
+        sandbox.resolve_path("../escape.txt")
+    sandbox.cleanup()

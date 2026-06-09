@@ -35,7 +35,8 @@ class Session:
                     "status": task.status,
                     "duration_ms": task.duration_ms,
                     "sandbox_mode": task.sandbox_mode,
-                    "error_summary": task.error_summary
+                    "error_summary": task.error_summary,
+                    "trace_id": task.trace_id,
                 },
                 "steps": [
                     {

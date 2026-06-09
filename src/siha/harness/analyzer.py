@@ -1,7 +1,7 @@
 """Post-run trace analysis using meta LLM"""
 
-from typing import Dict, Any, List
-from siha.llm.client import NvidiaClient
+from typing import Dict, Any, List, Optional
+from siha.llm.factory import create_llm_client
 from siha.llm.registry import get_model_for_role
 from siha.agent.session import Session
 import json
@@ -9,9 +9,11 @@ import json
 
 class Analyzer:
     """Analyzes task execution traces to propose improvements"""
-    
+
     def __init__(self):
-        self.client = NvidiaClient(get_model_for_role("meta"))
+        self.client = create_llm_client(
+            model=get_model_for_role("meta"),
+        )
     
     def analyze_task(self, task_id: int) -> Dict[str, Any]:
         """Analyze a completed task and propose mutations"""

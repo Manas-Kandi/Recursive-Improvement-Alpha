@@ -1,6 +1,6 @@
 """Deterministic benchmark execution and scoring"""
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from siha.db import get_session
 from siha.models import Benchmark, BenchmarkRun, HarnessVersion, BenchmarkOrigin, Step, TaskCategory
 from siha.agent.loop import AgentLoop
@@ -120,7 +120,7 @@ def seed_benchmarks():
 class BenchmarkRunner:
     """Executes benchmarks deterministically and scores results"""
     
-    def run_benchmark(self, benchmark: Benchmark, harness_version_id: int) -> BenchmarkRun:
+    def run_benchmark(self, benchmark: Benchmark, harness_version_id: Optional[int] = None) -> BenchmarkRun:
         """Run a single benchmark and record results"""
 
         start_time = time.time()
@@ -147,11 +147,19 @@ class BenchmarkRunner:
         score = self._score_assertions(benchmark, task)
         output_text = self._task_output_text(task.id)
         
+        # Resolve harness version for the run record
+        resolved_hv = harness_version_id or 0
+        if harness_version_id is None:
+            with get_session() as session:
+                latest = session.query(HarnessVersion).order_by(HarnessVersion.id.desc()).first()
+                if latest:
+                    resolved_hv = latest.id
+
         # Record run
         with get_session() as session:
             run = BenchmarkRun(
                 benchmark_id=benchmark.id,
-                harness_version=harness_version_id,
+                harness_version=resolved_hv,
                 passed=score == 1.0,
                 score=score,
                 duration_ms=duration_ms,

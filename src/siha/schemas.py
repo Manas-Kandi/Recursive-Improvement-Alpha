@@ -216,6 +216,7 @@ class RunTaskPayload(BaseModel):
     prompt: str
     sandbox: Optional[str] = None
     model: Optional[str] = None
+    provider: Optional[str] = None
     harness_version_id: Optional[int] = None
     trace_id: Optional[str] = None
 

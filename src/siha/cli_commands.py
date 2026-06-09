@@ -211,7 +211,7 @@ def cmd_bench() -> None:
     results = []
     for benchmark in benchmarks:
         console.print(f"  Running: {benchmark.name}")
-        run = runner.run_benchmark(benchmark, 1)  # Version 1 as baseline
+        run = runner.run_benchmark(benchmark, None)  # Use default active harness
         results.append({
             "name": benchmark.name,
             "score": run.score,

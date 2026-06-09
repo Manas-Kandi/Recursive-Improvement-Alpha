@@ -1,7 +1,7 @@
 """Auto-generate benchmarks from novel tasks"""
 
 from typing import Dict, Any, Optional
-from siha.llm.client import NvidiaClient
+from siha.llm.factory import create_llm_client
 from siha.llm.registry import get_model_for_role
 from siha.db import get_session
 from siha.models import Benchmark, BenchmarkOrigin, Task
@@ -11,9 +11,11 @@ import json
 
 class BenchmarkGenerator:
     """Auto-generates benchmarks from novel task categories"""
-    
+
     def __init__(self):
-        self.client = NvidiaClient(get_model_for_role("meta"))
+        self.client = create_llm_client(
+            model=get_model_for_role("meta"),
+        )
     
     def generate_from_task(self, task_id: int) -> Optional[Benchmark]:
         """Generate a benchmark from a completed task if it represents a novel category"""

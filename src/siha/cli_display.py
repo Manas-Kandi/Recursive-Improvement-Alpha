@@ -23,11 +23,11 @@ console = Console()
 _TOOL_ICONS: Dict[str, str] = {
     "read_file": "\U0001f4d6",
     "write_file": "\u270d ",
-    "patch_file": "\U0001fa79",
-    "bash": "\U0001f4bb",
-    "list_files": "\U0001f4c2",
-    "search_files": "\U0001f50d",
-    "run_tests": "\U0001f9ea",
+    "run_shell": "\U0001f4bb",
+    "run_python": "\U0001f40d",
+    "list_dir": "\U0001f4c2",
+    "web_search": "\U0001f50d",
+    "browse_web": "\U0001f310",
 }
 _DEFAULT_ICON = "\u26a1"
 

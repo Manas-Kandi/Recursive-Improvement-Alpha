@@ -388,29 +388,38 @@ class AgentLoop:
 
         _emit("thinking_start", {"step": 0, "mode": "chat"})
         content_parts: List[str] = []
-        for chunk in self.client.stream(messages):
-            if chunk.choices and chunk.choices[0].delta.content:
-                token = chunk.choices[0].delta.content
-                content_parts.append(token)
-                _emit("content_token", {"token": token, "step": 0})
+        final_answer: Optional[str] = None
+        error_summary: Optional[str] = None
+        status = TaskStatus.success
 
-        final_answer = "".join(content_parts)
+        try:
+            for chunk in self.client.stream(messages):
+                if chunk.choices and chunk.choices[0].delta.content:
+                    token = chunk.choices[0].delta.content
+                    content_parts.append(token)
+                    _emit("content_token", {"token": token, "step": 0})
+
+            final_answer = "".join(content_parts)
+        except Exception as e:
+            status = TaskStatus.failed
+            error_summary = str(e)
+
         duration_ms = int((time.time() - start_time) * 1000)
-
         with get_session() as session:
             task = session.get(Task, task_id)
-            task.status = TaskStatus.success
+            task.status = status
             task.duration_ms = duration_ms
             task.final_answer = final_answer
+            task.error_summary = error_summary
             session.commit()
             session.refresh(task)
             self.task = task
 
         event_bus.publish(
             "task_finished",
-            {"task_id": task_id, "status": "success", "duration_ms": duration_ms},
+            {"task_id": task_id, "status": status.value, "duration_ms": duration_ms, "error_summary": error_summary},
         )
-        _emit("final_answer", {"content": final_answer})
+        _emit("final_answer", {"content": final_answer or error_summary or ""})
         return self.task
 
     def _get_system_prompt(self, intent: Optional[str] = None) -> str:
@@ -490,8 +499,8 @@ class AgentLoop:
     
     def _record_tool_call(self, tool_name: str, tool_args: Dict[str, Any], tool_result, duration_ms: int = 0):
         """Record a tool call to the database"""
-        from siha.models import Tool as ToolModel
-        
+        from siha.models import Tool as ToolModel, ToolKind
+
         with get_session() as session:
             # Get or create tool record
             tool = session.query(ToolModel).filter(ToolModel.name == tool_name).first()
@@ -501,7 +510,7 @@ class AgentLoop:
                     version="1.0.0",
                     description="Builtin tool",
                     json_schema={},
-                    implementation_kind="builtin"
+                    implementation_kind=ToolKind.builtin
                 )
                 session.add(tool)
                 session.commit()

@@ -7,7 +7,7 @@ from siha.models import (
     Tool, ToolKind, ToolStatus,
     Mutation, MutationStatus, MutationKind, HarnessVersion
 )
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class Mutator:
@@ -72,7 +72,7 @@ class Mutator:
 
             mutation.candidate_version_id = candidate_version.id
             mutation.status = MutationStatus.candidate
-            mutation.decided_ts = datetime.utcnow()
+            mutation.decided_ts = datetime.now(timezone.utc)
 
             session.commit()
             session.refresh(candidate_version)
@@ -93,7 +93,7 @@ class Mutator:
                 self._promote_strategy(session, mutation)
 
             mutation.status = MutationStatus.promoted
-            mutation.decided_ts = datetime.utcnow()
+            mutation.decided_ts = datetime.now(timezone.utc)
             version = self._create_harness_version(session)
             session.commit()
             session.refresh(version)
@@ -114,7 +114,7 @@ class Mutator:
                 self._rollback_strategy(session, mutation)
 
             mutation.status = MutationStatus.rolled_back
-            mutation.decided_ts = datetime.utcnow()
+            mutation.decided_ts = datetime.now(timezone.utc)
             version = self._create_harness_version(session)
             session.commit()
             session.refresh(version)
@@ -308,7 +308,7 @@ class Mutator:
                 strategy_ids.append(new_id)
 
         version = HarnessVersion(
-            label=f"v{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+            label=f"v{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
             prompt_set=prompt_ids,
             tool_set=tool_ids,
             strategy_set=strategy_ids,
