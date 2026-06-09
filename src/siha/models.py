@@ -60,6 +60,19 @@ class MutationKind(str, Enum):
     prompt = "prompt"
     tool = "tool"
     strategy = "strategy"
+    template = "template"
+
+
+class TemplateStatus(str, Enum):
+    active = "active"
+    candidate = "candidate"
+    archived = "archived"
+
+
+class TemplateOrigin(str, Enum):
+    seed = "seed"
+    synthesized = "synthesized"
+    manual = "manual"
 
 
 class MutationStatus(str, Enum):
@@ -202,3 +215,28 @@ class HarnessVersion(SQLModel, table=True):
     prompt_set: List[int] = Field(default_factory=list, sa_column=Column(JSON))
     tool_set: List[int] = Field(default_factory=list, sa_column=Column(JSON))
     strategy_set: List[int] = Field(default_factory=list, sa_column=Column(JSON))
+    template_set: List[int] = Field(default_factory=list, sa_column=Column(JSON))
+
+
+class ActionTemplate(SQLModel, table=True):
+    """A learnable deterministic mapping from a user-utterance pattern to a tool call.
+
+    ``args_template`` values may contain ``{1}``, ``{2}``, ... placeholders that
+    are substituted with the corresponding regex capture groups at match time.
+    Lower ``priority`` numbers are tried first.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    pattern: str
+    tool_name: str
+    args_template: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    priority: int = 100
+    example: Optional[str] = None
+    status: TemplateStatus = TemplateStatus.active
+    origin: TemplateOrigin = TemplateOrigin.seed
+    version: str = "1.0.0"
+    parent_id: Optional[int] = None
+    source_task_id: Optional[int] = Field(default=None)
+    hit_count: int = Field(default=0)
+    created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

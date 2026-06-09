@@ -7,6 +7,7 @@ from sqlmodel import select
 from siha.agent.loop import AgentLoop
 from siha.config import settings
 import re
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -143,10 +144,17 @@ class BenchmarkRunner:
         )
 
         duration_ms = int((time.time() - start_time) * 1000)
-        
-        # Score against assertions
-        score = self._score_assertions(benchmark, task)
+
+        # Score against assertions — file checks are verified against the
+        # actual workspace filesystem, not just logged output.
+        score = self._score_assertions(benchmark, task, workspace=workspace)
         output_text = self._task_output_text(task.id)
+
+        # Remove the benchmark workspace once scoring is done.
+        try:
+            shutil.rmtree(workspace, ignore_errors=True)
+        except OSError:
+            pass
         
         # Resolve harness version for the run record
         resolved_hv = harness_version_id or 0
@@ -177,9 +185,20 @@ class BenchmarkRunner:
             session.refresh(run)
             return run
     
-    def _score_assertions(self, benchmark: Benchmark, task) -> float:
-        """Score task execution against benchmark assertions"""
-        
+    def _score_assertions(
+        self,
+        benchmark: Benchmark,
+        task,
+        workspace: Optional[Path] = None,
+    ) -> float:
+        """Score task execution against benchmark assertions.
+
+        ``file_checks`` are verified against the real filesystem when a
+        workspace is provided: the file must exist and (optionally) its actual
+        content must match ``content_regex``. An agent that merely *talks*
+        about creating a file no longer passes.
+        """
+
         assertions = benchmark.assertion
         total_assertions = 0
         passed_assertions = 0
@@ -200,16 +219,31 @@ class BenchmarkRunner:
             if re.search(assertions["stdout_regex"], output_text, flags=re.I | re.M):
                 passed_assertions += 1
         
-        # Check file existence/content
+        # Check file existence/content against the real workspace
         if "file_checks" in assertions:
             for file_check in assertions["file_checks"]:
                 total_assertions += 1
                 path = file_check.get("path")
                 pattern = file_check.get("content_regex")
-                matched_path = not path or path in output_text
-                matched_content = not pattern or re.search(pattern, output_text, flags=re.I | re.M)
-                if matched_path and matched_content:
+
+                if workspace is not None and path:
+                    target = Path(workspace) / path
+                    if not target.exists():
+                        continue
+                    if pattern:
+                        try:
+                            content = target.read_text(errors="replace")
+                        except OSError:
+                            continue
+                        if not re.search(pattern, content, flags=re.I | re.M):
+                            continue
                     passed_assertions += 1
+                else:
+                    # Fallback (no workspace): match against logged output
+                    matched_path = not path or path in output_text
+                    matched_content = not pattern or re.search(pattern, output_text, flags=re.I | re.M)
+                    if matched_path and matched_content:
+                        passed_assertions += 1
         
         return passed_assertions / total_assertions if total_assertions > 0 else 0.0
 

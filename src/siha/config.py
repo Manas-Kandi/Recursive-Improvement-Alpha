@@ -45,9 +45,16 @@ class Settings(BaseSettings):
     sandbox_default: Literal["local", "docker"] = "local"
 
     # Self-improvement
-    require_human_approval: bool = False
+    require_human_approval: bool = True
     improve_interval_s: int = 300
     benchmark_promote_threshold: float = 0.05
+    # Number of repetitions per benchmark when scoring a harness version.
+    # Scores are averaged so a single flaky run cannot flip a promotion.
+    benchmark_runs: int = 3
+    # Reuse previously recorded scores for a harness version when available.
+    benchmark_cache: bool = True
+    # Upper bound on auto-generated benchmarks so the suite stays tractable.
+    max_auto_benchmarks: int = 50
 
     # LLM parameters
     temperature: float = 0.7

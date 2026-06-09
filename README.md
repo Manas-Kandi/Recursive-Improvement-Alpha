@@ -124,8 +124,11 @@ All options live in `.env`:
 | `STEP_BUDGET` | `50` | Max agent steps per task |
 | `TIMEOUT_S` | `120` | Tool execution timeout |
 | `SANDBOX_DEFAULT` | `local` | `local` or `docker` |
-| `REQUIRE_HUMAN_APPROVAL` | `false` | Gate self-improvement mutations behind manual approval |
+| `REQUIRE_HUMAN_APPROVAL` | `true` | Gate self-improvement mutations behind manual approval |
 | `IMPROVE_INTERVAL_S` | `300` | Background improvement cycle interval (seconds) |
+| `BENCHMARK_RUNS` | `3` | Repetitions per benchmark when scoring a harness version (averaged) |
+| `BENCHMARK_CACHE` | `true` | Reuse previously recorded scores for a harness version |
+| `MAX_AUTO_BENCHMARKS` | `50` | Cap on auto-generated benchmarks |
 
 ---
 
@@ -147,14 +150,24 @@ User Input
     ↓
 ┌─────────────────┐     Match?    ┌─────────────────┐
 │  Action Mapper  │ ──yes────→    │  Execute Tools  │  ← deterministic
-│  (regex templates)│             └─────────────────┘
-└─────────────────┘                   ↓
-    ↓ no match                     ┌─────────────────┐
-┌─────────────────┐                │  Main Model     │  ← only for natural
-│  Task Planner   │  ← LLM plans   │  (summarizer)   │    language response
-│  (LLM fallback) │    first step  └─────────────────┘
-└─────────────────┘
+│ (DB templates,  │               └─────────────────┘
+│  self-learned)  │                   ↓
+└─────────────────┘               ┌─────────────────┐
+    ↓ no match                     │  Main Model     │  ← only for natural
+┌─────────────────┐                │  (summarizer)   │    language response
+│  Task Planner   │  ← LLM plans   └─────────────────┘
+│ (grammar-       │    first step       ↓ on success
+│  constrained)   │               ┌─────────────────┐
+└─────────────────┘               │  Synthesizer    │  ← distills the success
+                                  │ (trace→template)│    into a NEW template
+                                  └─────────────────┘
 ```
+
+**The flywheel:** every novel request the LLM planner solves successfully is
+deterministically generalized into an `ActionTemplate` (plus a regression
+benchmark), evaluated as a candidate harness version, and promoted if it
+doesn't regress. The harness gets faster and cheaper with use — LLM
+involvement *decreases* over time.
 
 ### Core Modules
 
@@ -203,6 +216,39 @@ portal-web/               # React + Vite + Tailwind frontend
 ---
 
 ## Decision Log
+
+### 2026-06-09 — Learnable Template Layer, Grammar-Constrained Planning, Trustworthy Evaluation
+
+**Context:** The self-improvement loop could mutate prompts/tools but not the
+template layer (the actual product); benchmark scoring trusted logged output
+instead of the filesystem; promotion decisions were single-run and noisy; the
+meta-critic required a cloud model for every trace.
+
+**What changed:**
+- **M1 — Learnable templates:** `ActionTemplate` DB model + `MutationKind.template`
+  with full propose/candidate/promote/rollback lifecycle and `HarnessVersion.template_set`
+  pinning. `ActionMapper` loads templates from the DB with priority-ordered,
+  span-claiming matching (fixes overlapping duplicate tool calls). New
+  `TemplateSynthesizer` deterministically distills successful LLM-planned tasks
+  into reusable templates — the self-improvement flywheel.
+- **M2 — Reliability & safety:** `tools/safety.py` command guard blocks
+  catastrophic shell commands (rm -rf /, sudo, mkfs, fork bombs, curl|sh…).
+  `llm/grammar.py` generates GBNF grammars from tool schemas;
+  `LocalGGUFClient.chat_constrained` makes malformed tool calls physically
+  impossible for the local provider.
+- **M3 — Trustworthy evaluation:** benchmark `file_checks` verify the real
+  workspace filesystem; each benchmark runs `BENCHMARK_RUNS` times with score
+  caching per harness version; the auto-benchmark generator deduplicates by
+  prompt similarity instead of capping one-per-category; every synthesized
+  template ships with its own regression benchmark.
+- **M4 — Local-first meta-critic:** `harness/triage.py` classifies healthy
+  traces and recognizable failure modes (missing path, safety block, unknown
+  tool, timeout, malformed output, step-budget exhaustion) deterministically;
+  the LLM analyzer is only consulted for unexplained traces and its client is
+  lazily constructed. `REQUIRE_HUMAN_APPROVAL` now defaults to `true`.
+- **M5 — Grounded context:** `agent/workspace_index.py` injects a compact
+  file-tree snapshot into the system prompt; `agent/scaffolds.py` expands
+  trivial content into proper documents ("hello world" → real HTML5 page).
 
 ### 2025-06-08 — Harness-First Architecture for Small Model Support
 
@@ -306,8 +352,11 @@ pytest
 - `test_benchmarks.py` — Benchmark execution and scoring
 - `test_dynamic_tools.py` — Dynamic tool loading and execution
 - `test_mutation_lifecycle.py` — Mutation approval, evaluation, promotion, rollback
-
-**All tests passing:** 33 tests, 227 warnings (deprecations from SQLModel `session.query()` usage).
+- `test_action_templates.py` — Template matching, DB lifecycle, version pinning, synthesis
+- `test_safety_and_grammar.py` — Shell command guard and GBNF grammar generation
+- `test_evaluation.py` — Filesystem-grounded scoring, evaluator caching, generator dedupe
+- `test_triage.py` — Rule-based trace triage taxonomy
+- `test_scaffolds_and_index.py` — Content scaffolds and workspace index
 
 ---
 

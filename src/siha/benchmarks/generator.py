@@ -7,6 +7,7 @@ from siha.db import get_session
 from siha.models import Benchmark, BenchmarkOrigin, Task
 from sqlmodel import select
 from siha.agent.session import Session
+from siha.config import settings
 import json
 
 
@@ -19,26 +20,65 @@ class BenchmarkGenerator:
         )
     
     def generate_from_task(self, task_id: int) -> Optional[Benchmark]:
-        """Generate a benchmark from a completed task if it represents a novel category"""
-        
+        """Generate a benchmark from a completed task if it is sufficiently novel.
+
+        The suite grows monotonically with capability: similar prompts are
+        deduplicated and the total number of auto benchmarks is capped, but
+        there is no one-per-category ceiling.
+        """
+
         # Get task trace
         session = Session(task_id)
         trace = session.get_trace()
-        
+
+        # Skip if a benchmark with a near-identical prompt already exists,
+        # or the auto suite has hit its size cap.
+        if self._is_duplicate_prompt(trace['task']['prompt']):
+            return None
+        if self._auto_benchmark_count() >= settings.max_auto_benchmarks:
+            return None
+
         # Classify task category
         category = self._classify_category(trace)
-        
-        # Check if this category already has benchmarks
-        if self._category_exists(category):
-            return None
-        
+
         # Generate benchmark spec
         benchmark_spec = self._generate_benchmark_spec(trace, category)
-        
+
         # Persist benchmark
         benchmark = self._persist_benchmark(benchmark_spec, category)
-        
+
         return benchmark
+
+    @staticmethod
+    def _normalize_prompt(prompt: str) -> str:
+        return " ".join(prompt.lower().split())
+
+    def _is_duplicate_prompt(self, prompt: str) -> bool:
+        """Check whether an existing benchmark already covers this prompt."""
+        normalized = self._normalize_prompt(prompt)
+        with get_session() as session:
+            existing = session.exec(select(Benchmark)).all()
+        for bench in existing:
+            bench_prompt = self._normalize_prompt(
+                (bench.task_spec or {}).get("prompt", "")
+            )
+            if not bench_prompt:
+                continue
+            if bench_prompt == normalized:
+                return True
+            # Cheap token-overlap similarity (Jaccard) to catch near-duplicates.
+            a, b = set(normalized.split()), set(bench_prompt.split())
+            if a and b and len(a & b) / len(a | b) >= 0.8:
+                return True
+        return False
+
+    @staticmethod
+    def _auto_benchmark_count() -> int:
+        with get_session() as session:
+            rows = session.exec(select(Benchmark).where(
+                Benchmark.origin == BenchmarkOrigin.auto,
+            )).all()
+            return len(rows)
     
     def _classify_category(self, trace: Dict[str, Any]) -> str:
         """Classify the task into a category"""
@@ -63,14 +103,6 @@ Return just the category name.
         # Default to data_processing if unknown
         valid_categories = ["math", "file_io", "shell", "web", "data_processing", "plotting"]
         return category if category in valid_categories else "data_processing"
-    
-    def _category_exists(self, category: str) -> bool:
-        """Check if benchmarks already exist for this category"""
-        with get_session() as session:
-            existing = session.exec(select(Benchmark).where(
-                Benchmark.category == category
-            )).first()
-            return existing is not None
     
     def _generate_benchmark_spec(self, trace: Dict[str, Any], category: str) -> Dict[str, Any]:
         """Generate a deterministic benchmark spec from the task"""

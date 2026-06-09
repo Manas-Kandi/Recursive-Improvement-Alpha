@@ -15,6 +15,8 @@ from siha.portal.events import event_bus
 from siha.agent.router import IntentRouter
 from siha.agent.planner import TaskPlanner
 from siha.agent.action_mapper import ActionMapper
+from siha.agent.scaffolds import expand_content
+from siha.agent.workspace_index import build_workspace_index
 
 
 class AgentLoop:
@@ -101,7 +103,7 @@ class AgentLoop:
         # --- Action Mapping + Planning ---
         # Try deterministic templates FIRST (no LLM). Compound requests
         # ("create folder X and write file Y") may yield multiple steps.
-        mapper = ActionMapper()
+        mapper = ActionMapper(harness_version_id=self.harness_version_id)
         steps = mapper.map(user_prompt)
         source = "template"
 
@@ -123,6 +125,11 @@ class AgentLoop:
             # Resolve relative file paths against working memory context
             if tool_name in ("write_file", "read_file") and "path" in tool_args:
                 tool_args["path"] = self._resolve_path(tool_args["path"])
+            # Expand trivial content into a proper document scaffold
+            if tool_name == "write_file" and "content" in tool_args:
+                tool_args["content"] = expand_content(
+                    tool_args.get("path", ""), tool_args["content"]
+                )
             _emit("action_step", {"tool": tool_name, "args": tool_args, "source": source})
 
             exec_start = time.time()
@@ -428,8 +435,12 @@ class AgentLoop:
         from siha.agent.prompts import get_active_prompt
         from siha.models import PromptRole
 
+        workspace_index = self._build_workspace_index_context()
+
         prompt = get_active_prompt(PromptRole.system, harness_version_id=self.harness_version_id)
         if prompt:
+            if workspace_index:
+                prompt = f"{prompt}\n\n{workspace_index}"
             return prompt
 
         tool_list = []
@@ -466,9 +477,20 @@ class AgentLoop:
             'RIGHT: {"tool": "write_file", "arguments": {"path": "hello.txt", "content": "Hello World"}}\n'
             "Then wait for the tool result and confirm completion.\n\n"
             + (context + "\n\n" if context else "")
+            + (workspace_index + "\n\n" if workspace_index else "")
             + "Available tools:\n"
             + "\n".join(tool_list)
         )
+
+    def _build_workspace_index_context(self) -> str:
+        """Snapshot the sandbox workspace as grounded path context."""
+        if self.sandbox is None:
+            return ""
+        root = getattr(self.sandbox, "temp_dir", None)
+        try:
+            return build_workspace_index(root)
+        except Exception:
+            return ""
     
     def _record_step(self, step_type: StepType, content: Dict[str, Any], tokens: int, latency_ms: int):
         """Record a step to the database"""

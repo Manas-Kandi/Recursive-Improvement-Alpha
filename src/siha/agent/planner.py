@@ -46,11 +46,24 @@ class TaskPlanner:
         )
 
         try:
-            response = self.client.chat(
-                [{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=256,
-            )
+            if hasattr(self.client, "chat_constrained"):
+                # Grammar-constrained decoding: the local model physically
+                # cannot emit a malformed tool call.
+                from siha.llm.grammar import build_tool_call_grammar
+
+                grammar = build_tool_call_grammar(tools)
+                response = self.client.chat_constrained(
+                    [{"role": "user", "content": prompt}],
+                    grammar,
+                    temperature=0.1,
+                    max_tokens=256,
+                )
+            else:
+                response = self.client.chat(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=256,
+                )
             raw = response.choices[0].message.content.strip()
 
             # Strip markdown fences if present

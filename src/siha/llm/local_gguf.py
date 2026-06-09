@@ -145,6 +145,44 @@ class LocalGGUFClient(LLMProvider):
             ],
         )
 
+    def chat_constrained(
+        self,
+        messages: List[Dict[str, Any]],
+        grammar: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> ChatCompletion:
+        """Chat completion with GBNF grammar-constrained decoding.
+
+        The decoder can only sample tokens that keep the output inside the
+        grammar, so the response is guaranteed to be syntactically valid
+        (e.g. a well-formed tool-call JSON object).
+        """
+        from llama_cpp import LlamaGrammar
+
+        prompt = self._build_prompt(messages, tools=None)
+        grammar_obj = LlamaGrammar.from_string(grammar, verbose=False)
+        output = self.llm(
+            prompt,
+            temperature=temperature if temperature is not None else self.temperature,
+            max_tokens=max_tokens or 512,
+            grammar=grammar_obj,
+        )
+        text = output["choices"][0]["text"]
+        return ChatCompletion(
+            id="local-gguf-constrained-0",
+            object="chat.completion",
+            created=0,
+            model=self.model,
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content=text),
+                    finish_reason="stop",
+                )
+            ],
+        )
+
     def stream(
         self,
         messages: List[Dict[str, Any]],

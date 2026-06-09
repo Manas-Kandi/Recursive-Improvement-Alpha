@@ -18,9 +18,12 @@ from siha.cli_display import console, AgentDisplay, _TOOL_ICONS, _DEFAULT_ICON
 
 def cmd_init_db() -> None:
     """Initialize the database."""
+    from siha.agent.action_mapper import seed_default_templates
+
     init_database()
     seed_default_prompts()
-    console.print("[green]Database initialized and default prompts seeded.[/green]")
+    seed_default_templates()
+    console.print("[green]Database initialized; default prompts and action templates seeded.[/green]")
 
 
 def cmd_chat(

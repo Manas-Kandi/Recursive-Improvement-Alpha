@@ -5,6 +5,7 @@ from siha.db import get_session
 from siha.models import (
     Prompt, PromptRole, PromptStatus, Strategy, StrategyStatus,
     Tool, ToolKind, ToolStatus,
+    ActionTemplate, TemplateStatus, TemplateOrigin,
     Mutation, MutationStatus, MutationKind, HarnessVersion
 )
 from sqlmodel import select
@@ -70,6 +71,13 @@ class Mutator:
                     session,
                     strategy_override=(old_target.id if old_target else None, mutation.target_id),
                 )
+            elif mutation.kind == MutationKind.template:
+                old_target = self._resolve_template_target(session, mutation)
+                self._apply_template_mutation(session, mutation)
+                candidate_version = self._create_harness_version(
+                    session,
+                    template_override=(old_target.id if old_target else None, mutation.target_id),
+                )
 
             mutation.candidate_version_id = candidate_version.id
             mutation.status = MutationStatus.candidate
@@ -92,6 +100,8 @@ class Mutator:
                 self._promote_tool(session, mutation)
             elif mutation.kind == MutationKind.strategy:
                 self._promote_strategy(session, mutation)
+            elif mutation.kind == MutationKind.template:
+                self._promote_template(session, mutation)
 
             mutation.status = MutationStatus.promoted
             mutation.decided_ts = datetime.now(timezone.utc)
@@ -113,6 +123,8 @@ class Mutator:
                 self._rollback_tool(session, mutation)
             elif mutation.kind == MutationKind.strategy:
                 self._rollback_strategy(session, mutation)
+            elif mutation.kind == MutationKind.template:
+                self._rollback_template(session, mutation)
 
             mutation.status = MutationStatus.rolled_back
             mutation.decided_ts = datetime.now(timezone.utc)
@@ -266,6 +278,63 @@ class Mutator:
             if parent:
                 parent.status = StrategyStatus.active
 
+    # -- Template helpers --
+
+    def _resolve_template_target(self, session, mutation: Mutation) -> Optional[ActionTemplate]:
+        if mutation.target_id:
+            return session.exec(select(ActionTemplate).where(
+                ActionTemplate.id == mutation.target_id,
+            )).first()
+        name = mutation.after.get("name") or mutation.before.get("name") or mutation.target_name
+        if name:
+            return session.exec(select(ActionTemplate).where(
+                ActionTemplate.name == name,
+                ActionTemplate.status == TemplateStatus.active,
+            )).first()
+        return None
+
+    def _apply_template_mutation(self, session, mutation: Mutation):
+        old_template = self._resolve_template_target(session, mutation)
+        name = mutation.after.get("name") or (old_template.name if old_template else "synthesized_template")
+        new_template = ActionTemplate(
+            name=name,
+            pattern=mutation.after.get("pattern", old_template.pattern if old_template else ""),
+            tool_name=mutation.after.get("tool_name", old_template.tool_name if old_template else ""),
+            args_template=mutation.after.get("args_template") or (old_template.args_template if old_template else {}),
+            priority=mutation.after.get("priority", old_template.priority if old_template else 100),
+            example=mutation.after.get("example", old_template.example if old_template else None),
+            origin=mutation.after.get("origin", TemplateOrigin.synthesized),
+            version=self._next_version(old_template.version if old_template else "1.0.0"),
+            parent_id=old_template.id if old_template else None,
+            source_task_id=mutation.after.get("source_task_id"),
+            status=TemplateStatus.candidate,
+        )
+        session.add(new_template)
+        session.flush()
+        mutation.target_id = new_template.id
+
+    def _promote_template(self, session, mutation: Mutation):
+        candidate = session.exec(select(ActionTemplate).where(
+            ActionTemplate.id == mutation.target_id,
+        )).first()
+        if not candidate:
+            return
+        parent = session.exec(select(ActionTemplate).where(
+            ActionTemplate.name == candidate.name,
+            ActionTemplate.id != candidate.id,
+            ActionTemplate.status == TemplateStatus.active,
+        ).order_by(ActionTemplate.id.desc())).first()
+        if parent:
+            parent.status = TemplateStatus.archived
+        candidate.status = TemplateStatus.active
+
+    def _rollback_template(self, session, mutation: Mutation):
+        candidate = session.exec(select(ActionTemplate).where(
+            ActionTemplate.id == mutation.target_id,
+        )).first()
+        if candidate:
+            candidate.status = TemplateStatus.archived
+
     # -- Version snapshot --
 
     def _create_harness_version(
@@ -274,6 +343,7 @@ class Mutator:
         prompt_override: Optional[tuple] = None,
         tool_override: Optional[tuple] = None,
         strategy_override: Optional[tuple] = None,
+        template_override: Optional[tuple] = None,
     ) -> HarnessVersion:
         active_prompts = session.exec(select(Prompt).where(
             Prompt.status == PromptStatus.active
@@ -308,11 +378,23 @@ class Mutator:
             elif new_id and new_id not in strategy_ids:
                 strategy_ids.append(new_id)
 
+        active_templates = session.exec(select(ActionTemplate).where(
+            ActionTemplate.status == TemplateStatus.active
+        )).all()
+        template_ids = [t.id for t in active_templates]
+        if template_override:
+            old_id, new_id = template_override
+            if old_id and old_id in template_ids:
+                template_ids[template_ids.index(old_id)] = new_id
+            elif new_id and new_id not in template_ids:
+                template_ids.append(new_id)
+
         version = HarnessVersion(
             label=f"v{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
             prompt_set=prompt_ids,
             tool_set=tool_ids,
             strategy_set=strategy_ids,
+            template_set=template_ids,
         )
         session.add(version)
         session.flush()

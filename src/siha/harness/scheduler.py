@@ -9,6 +9,7 @@ from sqlmodel import select
 from siha.harness.analyzer import Analyzer
 from siha.harness.mutator import Mutator
 from siha.harness.evaluator import Evaluator
+from siha.harness.synthesizer import TemplateSynthesizer
 from siha.config import settings
 from siha.logging import get_logger
 
@@ -22,6 +23,7 @@ class Scheduler:
         self.analyzer = Analyzer()
         self.mutator = Mutator()
         self.evaluator = Evaluator()
+        self.synthesizer = TemplateSynthesizer(mutator=self.mutator)
         self.running = False
         self.thread: Optional[threading.Thread] = None
     
@@ -70,6 +72,14 @@ class Scheduler:
         for task_id in task_ids:
             critique = None
             try:
+                # Deterministic distillation first: if the LLM planner solved this
+                # task, generalize it into a reusable action template.
+                synth_mutation = self.synthesizer.synthesize_from_task(task_id)
+                if synth_mutation is not None:
+                    event_bus.publish("mutation_proposed", {"mutation_id": synth_mutation.id})
+                    if not settings.require_human_approval:
+                        self.mutator.apply_mutation(synth_mutation)
+
                 critique = self.analyzer.analyze_task(task_id)
                 for mutation_data in critique.get("proposed_mutations", []):
                     mutation = self.mutator.propose_mutation(mutation_data)

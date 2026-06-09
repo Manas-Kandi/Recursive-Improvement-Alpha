@@ -95,7 +95,17 @@ class RunShellTool(SandboxTool):
         }
     
     def run(self, **kwargs) -> ToolResult:
+        from siha.tools.safety import check_command
+
         command = kwargs.get("command", "")
+        rejection = check_command(command)
+        if rejection:
+            return ToolResult(
+                success=False,
+                output="",
+                error=rejection,
+                data={"blocked": True}
+            )
         result = self.sandbox.run(command)
         return ToolResult(
             success=result.success,
