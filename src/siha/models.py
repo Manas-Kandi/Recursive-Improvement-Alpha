@@ -33,7 +33,7 @@ class ToolKind(str, Enum):
 class ToolStatus(str, Enum):
     active = "active"
     candidate = "candidate"
-    deprecated = "deprecated"
+    archived = "archived"
 
 
 class PromptRole(str, Enum):

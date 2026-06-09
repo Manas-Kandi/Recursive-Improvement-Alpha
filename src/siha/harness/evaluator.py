@@ -3,6 +3,7 @@
 from typing import Dict, Any, Optional
 from siha.db import get_session
 from siha.models import Benchmark, HarnessVersion, Mutation, MutationStatus
+from sqlmodel import select
 from siha.benchmarks.runner import BenchmarkRunner
 from siha.config import settings
 
@@ -20,7 +21,7 @@ class Evaluator:
             if not version:
                 return 0.0
 
-            benchmarks = session.query(Benchmark).all()
+            benchmarks = session.exec(select(Benchmark)).all()
 
         total_score = 0.0
         for benchmark in benchmarks:

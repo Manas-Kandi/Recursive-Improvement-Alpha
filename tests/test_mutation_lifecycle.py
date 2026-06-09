@@ -13,6 +13,7 @@ from siha.harness.mutator import Mutator
 from siha.harness.evaluator import Evaluator
 from siha.tools.registry import ToolRegistry
 from siha.agent.prompts import get_active_prompt
+from sqlmodel import select
 
 
 @pytest.fixture(autouse=True)
@@ -94,15 +95,15 @@ class TestPromptMutationLifecycle:
         version = mutator.apply_mutation(mutation)
 
         with get_session() as session:
-            prompts = session.query(Prompt).all()
+            prompts = session.exec(select(Prompt)).all()
             assert len(prompts) == 2
 
             old_refreshed = session.get(Prompt, old.id)
             assert old_refreshed.status == PromptStatus.active
 
-            candidate = session.query(Prompt).filter(
+            candidate = session.exec(select(Prompt).where(
                 Prompt.status == PromptStatus.candidate
-            ).first()
+            )).first()
             assert candidate is not None
             assert candidate.text == "new system prompt"
 
@@ -129,9 +130,9 @@ class TestPromptMutationLifecycle:
             old_refreshed = session.get(Prompt, old.id)
             assert old_refreshed.status == PromptStatus.archived
 
-            candidate = session.query(Prompt).filter(
+            candidate = session.exec(select(Prompt).where(
                 Prompt.status == PromptStatus.active
-            ).first()
+            )).first()
             assert candidate.text == "new system prompt"
 
             mutation = session.get(Mutation, mutation.id)
@@ -155,9 +156,9 @@ class TestPromptMutationLifecycle:
             old_refreshed = session.get(Prompt, old.id)
             assert old_refreshed.status == PromptStatus.active
 
-            candidate = session.query(Prompt).filter(
+            candidate = session.exec(select(Prompt).where(
                 Prompt.status == PromptStatus.candidate
-            ).first()
+            )).first()
             assert candidate is None
 
             mutation = session.get(Mutation, mutation.id)
@@ -182,9 +183,9 @@ class TestToolMutationLifecycle:
             old_refreshed = session.get(Tool, old.id)
             assert old_refreshed.status == ToolStatus.active
 
-            candidate = session.query(Tool).filter(
+            candidate = session.exec(select(Tool).where(
                 Tool.status == ToolStatus.candidate
-            ).first()
+            )).first()
             assert candidate is not None
             assert candidate.name == "adder"
 
@@ -207,11 +208,11 @@ class TestToolMutationLifecycle:
 
         with get_session() as session:
             old_refreshed = session.get(Tool, old.id)
-            assert old_refreshed.status == ToolStatus.deprecated
+            assert old_refreshed.status == ToolStatus.archived
 
-            active = session.query(Tool).filter(
+            active = session.exec(select(Tool).where(
                 Tool.status == ToolStatus.active
-            ).first()
+            )).first()
             assert active.code == "def run(**kwargs): return kwargs.get('a',0)+kwargs.get('b',0)"
 
     def test_rollback_tool_keeps_old_active(self):
@@ -232,9 +233,9 @@ class TestToolMutationLifecycle:
             old_refreshed = session.get(Tool, old.id)
             assert old_refreshed.status == ToolStatus.active
 
-            candidate = session.query(Tool).filter(
+            candidate = session.exec(select(Tool).where(
                 Tool.status == ToolStatus.candidate
-            ).first()
+            )).first()
             assert candidate is None
 
 

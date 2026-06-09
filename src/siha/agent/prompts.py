@@ -3,7 +3,7 @@
 from typing import Optional
 from siha.db import get_session
 from siha.models import Prompt, PromptRole
-
+from sqlmodel import select
 
 def get_active_prompt(role: PromptRole, harness_version_id: Optional[int] = None) -> Optional[str]:
     """Load the active prompt for a given role from the database.
@@ -17,16 +17,16 @@ def get_active_prompt(role: PromptRole, harness_version_id: Optional[int] = None
         if harness_version_id is not None:
             version = session.get(HarnessVersion, harness_version_id)
             if version and version.prompt_set:
-                prompt = session.query(Prompt).filter(
+                prompt = session.exec(select(Prompt).where(
                     Prompt.role == role,
                     Prompt.id.in_(version.prompt_set),
-                ).first()
+                )).first()
                 if prompt:
                     return prompt.text
-        prompt = session.query(Prompt).filter(
+        prompt = session.exec(select(Prompt).where(
             Prompt.role == role,
             Prompt.status == "active",
-        ).first()
+        )).first()
         return prompt.text if prompt else None
 
 
@@ -61,10 +61,10 @@ def seed_default_prompts():
     
     with get_session() as session:
         for prompt_def in default_prompts:
-            existing = session.query(Prompt).filter(
+            existing = session.exec(select(Prompt).where(
                 Prompt.role == prompt_def["role"],
                 Prompt.status == "active"
-            ).first()
+            )).first()
             
             if not existing:
                 prompt = Prompt(

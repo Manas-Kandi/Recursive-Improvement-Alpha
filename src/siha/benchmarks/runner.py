@@ -3,6 +3,7 @@
 from typing import Dict, Any, Optional
 from siha.db import get_session
 from siha.models import Benchmark, BenchmarkRun, HarnessVersion, BenchmarkOrigin, Step, TaskCategory
+from sqlmodel import select
 from siha.agent.loop import AgentLoop
 from siha.config import settings
 import re
@@ -100,9 +101,9 @@ def seed_benchmarks():
     
     with get_session() as session:
         for bench_def in benchmarks:
-            existing = session.query(Benchmark).filter(
+            existing = session.exec(select(Benchmark).where(
                 Benchmark.name == bench_def["name"]
-            ).first()
+            )).first()
             
             if not existing:
                 benchmark = Benchmark(
@@ -151,7 +152,7 @@ class BenchmarkRunner:
         resolved_hv = harness_version_id or 0
         if harness_version_id is None:
             with get_session() as session:
-                latest = session.query(HarnessVersion).order_by(HarnessVersion.id.desc()).first()
+                latest = session.exec(select(HarnessVersion).order_by(HarnessVersion.id.desc())).first()
                 if latest:
                     resolved_hv = latest.id
 
@@ -222,7 +223,7 @@ class BenchmarkRunner:
             if task and task.final_answer:
                 chunks.append(task.final_answer)
 
-            steps = session.query(Step).filter(Step.task_id == task_id).order_by(Step.idx).all()
+            steps = session.exec(select(Step).where(Step.task_id == task_id).order_by(Step.idx)).all()
             for step in steps:
                 content = step.content or {}
                 if isinstance(content, dict):
@@ -242,13 +243,13 @@ def get_benchmark_trend() -> Dict[str, Any]:
     from siha.models import BenchmarkRun, HarnessVersion
     
     with get_session() as session:
-        versions = session.query(HarnessVersion).order_by(HarnessVersion.id).all()
+        versions = session.exec(select(HarnessVersion).order_by(HarnessVersion.id)).all()
         
         trend_data = []
         for version in versions:
-            runs = session.query(BenchmarkRun).filter(
+            runs = session.exec(select(BenchmarkRun).where(
                 BenchmarkRun.harness_version == version.id
-            ).all()
+            )).all()
             
             if runs:
                 avg_score = sum(r.score for r in runs) / len(runs)

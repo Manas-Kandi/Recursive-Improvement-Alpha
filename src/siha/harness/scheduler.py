@@ -5,6 +5,7 @@ import time
 from typing import Optional
 from siha.db import get_session
 from siha.models import Task, TaskStatus, Mutation, MutationStatus
+from sqlmodel import select
 from siha.harness.analyzer import Analyzer
 from siha.harness.mutator import Mutator
 from siha.harness.evaluator import Evaluator
@@ -60,10 +61,10 @@ class Scheduler:
         from siha.portal.events import event_bus
 
         with get_session() as session:
-            tasks = session.query(Task).filter(
+            tasks = session.exec(select(Task).where(
                 Task.status == TaskStatus.success,
                 Task.analyzed == False,  # noqa: E712
-            ).order_by(Task.id).limit(10).all()
+            ).order_by(Task.id).limit(10)).all()
             task_ids = [t.id for t in tasks]
 
         for task_id in task_ids:
@@ -100,9 +101,9 @@ class Scheduler:
     def _evaluate_pending_mutations(self):
         """Evaluate candidate mutations against benchmarks and promote or rollback."""
         with get_session() as session:
-            candidate_mutations = session.query(Mutation).filter(
+            candidate_mutations = session.exec(select(Mutation).where(
                 Mutation.status == MutationStatus.candidate,
-            ).all()
+            )).all()
             mutation_ids = [m.id for m in candidate_mutations]
 
         for mutation_id in mutation_ids:

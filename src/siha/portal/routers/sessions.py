@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from siha.db import get_session
 from siha.models import Task, Step, ToolCall
 from siha.portal.auth import verify_auth
+from sqlmodel import select
 from siha.schemas import SessionListItem, SessionDetail
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 def get_sessions(limit: int = 50, token: str = Depends(verify_auth)):
     """Get list of recent sessions (tasks)."""
     with get_session() as session:
-        tasks = session.query(Task).order_by(Task.id.desc()).limit(limit).all()
+        tasks = session.exec(select(Task).order_by(Task.id.desc()).limit(limit)).all()
         return [
             SessionListItem(
                 id=t.id,
@@ -40,8 +41,8 @@ def get_session_detail(session_id: int, token: str = Depends(verify_auth)):
         if not task:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        steps = session.query(Step).filter(Step.task_id == session_id).order_by(Step.idx).all()
-        tool_calls = session.query(ToolCall).filter(ToolCall.task_id == session_id).all()
+        steps = session.exec(select(Step).where(Step.task_id == session_id).order_by(Step.idx)).all()
+        tool_calls = session.exec(select(ToolCall).where(ToolCall.task_id == session_id)).all()
 
         return SessionDetail(
             task={

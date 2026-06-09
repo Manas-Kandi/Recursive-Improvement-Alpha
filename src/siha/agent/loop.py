@@ -8,6 +8,7 @@ from typing import Callable, List, Dict, Any, Optional
 from siha.llm.factory import create_llm_client
 from siha.db import get_session
 from siha.models import Task, Step, StepType, TaskStatus, TaskCategory, ToolCall
+from sqlmodel import select
 from siha.tools.registry import ToolRegistry
 from siha.sandbox import create_sandbox
 from siha.portal.events import event_bus
@@ -503,7 +504,7 @@ class AgentLoop:
 
         with get_session() as session:
             # Get or create tool record
-            tool = session.query(ToolModel).filter(ToolModel.name == tool_name).first()
+            tool = session.exec(select(ToolModel).where(ToolModel.name == tool_name)).first()
             if not tool:
                 tool = ToolModel(
                     name=tool_name,

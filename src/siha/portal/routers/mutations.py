@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from siha.db import get_session
 from siha.models import Mutation, MutationStatus
 from siha.portal.auth import verify_auth
+from sqlmodel import select
 from siha.schemas import MutationItem, MutationActionResponse
 
 router = APIRouter(prefix="/mutations", tags=["mutations"])
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/mutations", tags=["mutations"])
 def get_mutations(token: str = Depends(verify_auth)):
     """Get mutation history."""
     with get_session() as session:
-        mutations = session.query(Mutation).order_by(Mutation.id.desc()).limit(100).all()
+        mutations = session.exec(select(Mutation).order_by(Mutation.id.desc()).limit(100)).all()
         return [
             MutationItem(
                 id=m.id,

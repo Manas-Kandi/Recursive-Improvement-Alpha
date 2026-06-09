@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.live import Live
 
 from siha.db import init_db as init_database, get_session
+from sqlmodel import select
 from siha.agent.loop import AgentLoop
 from siha.agent.prompts import seed_default_prompts
 from siha.config import settings
@@ -206,7 +207,7 @@ def cmd_bench() -> None:
 
     with get_session() as session:
         from siha.models import Benchmark
-        benchmarks = session.query(Benchmark).all()
+        benchmarks = session.exec(select(Benchmark)).all()
 
     results = []
     for benchmark in benchmarks:

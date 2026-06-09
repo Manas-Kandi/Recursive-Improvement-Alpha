@@ -49,7 +49,7 @@ def upgrade() -> None:
     sa.Column('before', sa.JSON(), nullable=True),
     sa.Column('after', sa.JSON(), nullable=True),
     sa.Column('rationale', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('status', sa.Enum('pending', 'active', 'reverted', 'rejected', name='mutationstatus'), nullable=False),
+    sa.Column('status', sa.Enum('proposed', 'pending', 'candidate', 'evaluating', 'promoted', 'active', 'reverted', 'rejected', 'rolled_back', name='mutationstatus'), nullable=False),
     sa.Column('benchmark_delta', sa.Float(), nullable=True),
     sa.Column('created_ts', sa.DateTime(), nullable=False),
     sa.Column('decided_ts', sa.DateTime(), nullable=True),
@@ -98,7 +98,7 @@ def upgrade() -> None:
     sa.Column('implementation_kind', sa.Enum('builtin', 'python_code', name='toolkind'), nullable=False),
     sa.Column('code', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('source_url', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
-    sa.Column('status', sa.Enum('active', 'deprecated', name='toolstatus'), nullable=False),
+    sa.Column('status', sa.Enum('active', 'archived', name='toolstatus'), nullable=False),
     sa.Column('created_ts', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )

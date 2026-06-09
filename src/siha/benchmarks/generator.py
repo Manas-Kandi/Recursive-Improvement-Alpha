@@ -5,6 +5,7 @@ from siha.llm.factory import create_llm_client
 from siha.llm.registry import get_model_for_role
 from siha.db import get_session
 from siha.models import Benchmark, BenchmarkOrigin, Task
+from sqlmodel import select
 from siha.agent.session import Session
 import json
 
@@ -66,9 +67,9 @@ Return just the category name.
     def _category_exists(self, category: str) -> bool:
         """Check if benchmarks already exist for this category"""
         with get_session() as session:
-            existing = session.query(Benchmark).filter(
+            existing = session.exec(select(Benchmark).where(
                 Benchmark.category == category
-            ).first()
+            )).first()
             return existing is not None
     
     def _generate_benchmark_spec(self, trace: Dict[str, Any], category: str) -> Dict[str, Any]:

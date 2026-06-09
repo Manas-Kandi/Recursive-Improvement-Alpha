@@ -7,6 +7,7 @@ from siha.models import (
     Tool, ToolKind, ToolStatus,
     Mutation, MutationStatus, MutationKind, HarnessVersion
 )
+from sqlmodel import select
 from datetime import datetime, timezone
 
 
@@ -124,13 +125,13 @@ class Mutator:
 
     def _resolve_prompt_target(self, session, mutation: Mutation) -> Optional[Prompt]:
         if mutation.target_id:
-            return session.query(Prompt).filter(Prompt.id == mutation.target_id).first()
+            return session.exec(select(Prompt).where(Prompt.id == mutation.target_id)).first()
         role_str = mutation.after.get("role") or mutation.before.get("role") or mutation.target_name
         if role_str:
-            return session.query(Prompt).filter(
+            return session.exec(select(Prompt).where(
                 Prompt.role == role_str,
                 Prompt.status == PromptStatus.active,
-            ).first()
+            )).first()
         return None
 
     def _apply_prompt_mutation(self, session, mutation: Mutation):
@@ -149,20 +150,20 @@ class Mutator:
         mutation.target_id = new_prompt.id
 
     def _promote_prompt(self, session, mutation: Mutation):
-        candidate = session.query(Prompt).filter(Prompt.id == mutation.target_id).first()
+        candidate = session.exec(select(Prompt).where(Prompt.id == mutation.target_id)).first()
         if candidate and candidate.parent_id:
-            parent = session.query(Prompt).filter(Prompt.id == candidate.parent_id).first()
+            parent = session.exec(select(Prompt).where(Prompt.id == candidate.parent_id)).first()
             if parent:
                 parent.status = PromptStatus.archived
         if candidate:
             candidate.status = PromptStatus.active
 
     def _rollback_prompt(self, session, mutation: Mutation):
-        candidate = session.query(Prompt).filter(Prompt.id == mutation.target_id).first()
+        candidate = session.exec(select(Prompt).where(Prompt.id == mutation.target_id)).first()
         if candidate:
             candidate.status = PromptStatus.archived
             if candidate.parent_id:
-                parent = session.query(Prompt).filter(Prompt.id == candidate.parent_id).first()
+                parent = session.exec(select(Prompt).where(Prompt.id == candidate.parent_id)).first()
                 if parent:
                     parent.status = PromptStatus.active
 
@@ -170,13 +171,13 @@ class Mutator:
 
     def _resolve_tool_target(self, session, mutation: Mutation) -> Optional[Tool]:
         if mutation.target_id:
-            return session.query(Tool).filter(Tool.id == mutation.target_id).first()
+            return session.exec(select(Tool).where(Tool.id == mutation.target_id)).first()
         name = mutation.after.get("name") or mutation.before.get("name") or mutation.target_name
         if name:
-            return session.query(Tool).filter(
+            return session.exec(select(Tool).where(
                 Tool.name == name,
                 Tool.status == ToolStatus.active,
-            ).first()
+            )).first()
         return None
 
     def _apply_tool_mutation(self, session, mutation: Mutation):
@@ -197,35 +198,35 @@ class Mutator:
         mutation.target_id = new_tool.id
 
     def _promote_tool(self, session, mutation: Mutation):
-        candidate = session.query(Tool).filter(Tool.id == mutation.target_id).first()
+        candidate = session.exec(select(Tool).where(Tool.id == mutation.target_id)).first()
         if not candidate:
             return
         # Find the parent (previous active tool with same name)
-        parent = session.query(Tool).filter(
+        parent = session.exec(select(Tool).where(
             Tool.name == candidate.name,
             Tool.id != candidate.id,
             Tool.status == ToolStatus.active,
-        ).order_by(Tool.id.desc()).first()
+        ).order_by(Tool.id.desc())).first()
         if parent:
-            parent.status = ToolStatus.deprecated
+            parent.status = ToolStatus.archived
         candidate.status = ToolStatus.active
 
     def _rollback_tool(self, session, mutation: Mutation):
-        candidate = session.query(Tool).filter(Tool.id == mutation.target_id).first()
+        candidate = session.exec(select(Tool).where(Tool.id == mutation.target_id)).first()
         if candidate:
-            candidate.status = ToolStatus.deprecated
+            candidate.status = ToolStatus.archived
 
     # -- Strategy helpers --
 
     def _resolve_strategy_target(self, session, mutation: Mutation) -> Optional[Strategy]:
         if mutation.target_id:
-            return session.query(Strategy).filter(Strategy.id == mutation.target_id).first()
+            return session.exec(select(Strategy).where(Strategy.id == mutation.target_id)).first()
         key = mutation.after.get("key") or mutation.before.get("key") or mutation.target_name
         if key:
-            return session.query(Strategy).filter(
+            return session.exec(select(Strategy).where(
                 Strategy.key == key,
                 Strategy.status == StrategyStatus.active,
-            ).first()
+            )).first()
         return None
 
     def _apply_strategy_mutation(self, session, mutation: Mutation):
@@ -242,26 +243,26 @@ class Mutator:
         mutation.target_id = new_strategy.id
 
     def _promote_strategy(self, session, mutation: Mutation):
-        candidate = session.query(Strategy).filter(Strategy.id == mutation.target_id).first()
+        candidate = session.exec(select(Strategy).where(Strategy.id == mutation.target_id)).first()
         if not candidate:
             return
-        parent = session.query(Strategy).filter(
+        parent = session.exec(select(Strategy).where(
             Strategy.key == candidate.key,
             Strategy.id != candidate.id,
             Strategy.status == StrategyStatus.active,
-        ).order_by(Strategy.id.desc()).first()
+        ).order_by(Strategy.id.desc())).first()
         if parent:
             parent.status = StrategyStatus.archived
         candidate.status = StrategyStatus.active
 
     def _rollback_strategy(self, session, mutation: Mutation):
-        candidate = session.query(Strategy).filter(Strategy.id == mutation.target_id).first()
+        candidate = session.exec(select(Strategy).where(Strategy.id == mutation.target_id)).first()
         if candidate:
             candidate.status = StrategyStatus.archived
-            parent = session.query(Strategy).filter(
+            parent = session.exec(select(Strategy).where(
                 Strategy.key == candidate.key,
                 Strategy.id != candidate.id,
-            ).order_by(Strategy.id.desc()).first()
+            ).order_by(Strategy.id.desc())).first()
             if parent:
                 parent.status = StrategyStatus.active
 
@@ -274,9 +275,9 @@ class Mutator:
         tool_override: Optional[tuple] = None,
         strategy_override: Optional[tuple] = None,
     ) -> HarnessVersion:
-        active_prompts = session.query(Prompt).filter(
+        active_prompts = session.exec(select(Prompt).where(
             Prompt.status == PromptStatus.active
-        ).all()
+        )).all()
         prompt_ids = [p.id for p in active_prompts]
         if prompt_override:
             old_id, new_id = prompt_override
@@ -285,9 +286,9 @@ class Mutator:
             elif new_id and new_id not in prompt_ids:
                 prompt_ids.append(new_id)
 
-        active_tools = session.query(Tool).filter(
+        active_tools = session.exec(select(Tool).where(
             Tool.status == ToolStatus.active
-        ).all()
+        )).all()
         tool_ids = [t.id for t in active_tools]
         if tool_override:
             old_id, new_id = tool_override
@@ -296,9 +297,9 @@ class Mutator:
             elif new_id and new_id not in tool_ids:
                 tool_ids.append(new_id)
 
-        active_strategies = session.query(Strategy).filter(
+        active_strategies = session.exec(select(Strategy).where(
             Strategy.status == StrategyStatus.active
-        ).all()
+        )).all()
         strategy_ids = [s.id for s in active_strategies]
         if strategy_override:
             old_id, new_id = strategy_override

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from siha.db import get_session
 from siha.models import Tool
+from sqlmodel import select
 from siha.portal.auth import verify_auth
 from siha.schemas import ToolItem
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 def get_tools(token: str = Depends(verify_auth)):
     """Get all tools."""
     with get_session() as session:
-        tools = session.query(Tool).all()
+        tools = session.exec(select(Tool)).all()
         return [
             ToolItem(
                 id=t.id,

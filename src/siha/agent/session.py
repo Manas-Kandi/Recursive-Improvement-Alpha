@@ -3,6 +3,7 @@
 from typing import Optional
 from siha.models import Task
 from siha.db import get_session
+from sqlmodel import select
 
 
 class Session:
@@ -24,8 +25,8 @@ class Session:
         
         with get_session() as session:
             task = session.get(Task, self.task_id)
-            steps = session.query(Step).filter(Step.task_id == self.task_id).order_by(Step.idx).all()
-            tool_calls = session.query(ToolCall).filter(ToolCall.task_id == self.task_id).all()
+            steps = session.exec(select(Step).where(Step.task_id == self.task_id).order_by(Step.idx)).all()
+            tool_calls = session.exec(select(ToolCall).where(ToolCall.task_id == self.task_id)).all()
             
             return {
                 "task": {

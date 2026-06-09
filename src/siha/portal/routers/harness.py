@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from siha.db import get_session
 from siha.models import Prompt, PromptStatus, Tool, ToolStatus, Strategy, StrategyStatus, HarnessVersion
 from siha.portal.auth import verify_auth
+from sqlmodel import select
 from siha.schemas import HarnessState, HarnessVersionItem, VersionDiffResponse
 
 router = APIRouter(prefix="/harness", tags=["harness"])
@@ -16,9 +17,9 @@ router = APIRouter(prefix="/harness", tags=["harness"])
 def get_harness_state(token: str = Depends(verify_auth)):
     """Get current harness state (active prompts, tools, strategies)."""
     with get_session() as session:
-        prompts = session.query(Prompt).filter(Prompt.status == PromptStatus.active).all()
-        tools = session.query(Tool).filter(Tool.status == ToolStatus.active).all()
-        strategies = session.query(Strategy).filter(Strategy.status == StrategyStatus.active).all()
+        prompts = session.exec(select(Prompt).where(Prompt.status == PromptStatus.active)).all()
+        tools = session.exec(select(Tool).where(Tool.status == ToolStatus.active)).all()
+        strategies = session.exec(select(Strategy).where(Strategy.status == StrategyStatus.active)).all()
 
         return HarnessState(
             prompts=[
@@ -40,7 +41,7 @@ def get_harness_state(token: str = Depends(verify_auth)):
 def get_harness_versions(token: str = Depends(verify_auth)):
     """Get all harness versions."""
     with get_session() as session:
-        versions = session.query(HarnessVersion).order_by(HarnessVersion.id.desc()).all()
+        versions = session.exec(select(HarnessVersion).order_by(HarnessVersion.id.desc())).all()
         return [
             HarnessVersionItem(
                 id=v.id,

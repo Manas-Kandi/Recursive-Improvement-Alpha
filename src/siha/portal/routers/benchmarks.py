@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from siha.db import get_session
 from siha.models import Benchmark
+from sqlmodel import select
 from siha.benchmarks.runner import get_benchmark_trend
 from siha.portal.auth import verify_auth
 from siha.schemas import BenchmarkItem, BenchmarkTrend, BenchmarkRunAllResponse
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
 def get_benchmarks(token: str = Depends(verify_auth)):
     """Get all benchmarks."""
     with get_session() as session:
-        benchmarks = session.query(Benchmark).all()
+        benchmarks = session.exec(select(Benchmark)).all()
         return [
             BenchmarkItem(
                 id=b.id,
@@ -44,7 +45,7 @@ def run_all_benchmarks(token: str = Depends(verify_auth)):
     seed_benchmarks()
     runner = BenchmarkRunner()
     with get_session() as session:
-        benchmarks = session.query(Benchmark).all()
+        benchmarks = session.exec(select(Benchmark)).all()
     results = []
     for benchmark in benchmarks:
         run = runner.run_benchmark(benchmark, None)

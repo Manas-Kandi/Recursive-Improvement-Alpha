@@ -7,6 +7,7 @@ from siha.tools.dynamic import DynamicTool
 from siha.sandbox.base import Sandbox
 from siha.db import get_session
 from siha.models import Tool as ToolModel, ToolStatus, ToolKind, HarnessVersion
+from sqlmodel import select
 
 
 class ToolRegistry:
@@ -37,17 +38,17 @@ class ToolRegistry:
 
         try:
             with get_session() as session:
-                query = session.query(ToolModel).filter(
+                query = select(ToolModel).where(
                     ToolModel.implementation_kind == ToolKind.python_code,
                 )
                 if self.harness_version_id is not None:
                     version = session.get(HarnessVersion, self.harness_version_id)
                     if version and version.tool_set:
-                        query = query.filter(ToolModel.id.in_(version.tool_set))
+                        query = query.where(ToolModel.id.in_(version.tool_set))
                 else:
-                    query = query.filter(ToolModel.status == ToolStatus.active)
+                    query = query.where(ToolModel.status == ToolStatus.active)
 
-                for tool_model in query.all():
+                for tool_model in session.exec(query).all():
                     if not tool_model.code:
                         continue
                     self._db_tools[tool_model.name] = DynamicTool(
