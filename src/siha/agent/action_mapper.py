@@ -30,6 +30,17 @@ class TemplateSpec:
     args_template: Dict[str, Any]
     priority: int = 100
     template_id: Optional[int] = None
+    origin: str = "seed"
+    success_count: int = 0
+
+    @property
+    def probation(self) -> bool:
+        """Synthesized templates are untrusted until they accumulate
+        enough confirmed successes; seed/manual templates are trusted."""
+        if self.origin != "synthesized":
+            return False
+        from siha.config import settings
+        return self.success_count < settings.template_probation_runs
 
 
 # Seed templates. These are loaded into the DB by ``seed_default_templates``
@@ -180,6 +191,45 @@ def seed_default_templates() -> None:
         session.commit()
 
 
+def record_template_result(template_id: int, success: bool) -> bool:
+    """Update a template's trust counters after a match resolves.
+
+    A success is a confirmed-or-trusted execution that completed cleanly; a
+    failure is either a failed execution or a planner shadow-confirmation
+    mismatch. Synthesized templates whose failures reach the archive
+    threshold (and outnumber their successes) are automatically archived so
+    a bad generalization cannot keep mis-firing.
+
+    Returns True if the template was archived by this call.
+    """
+    from siha.config import settings
+    from siha.db import get_session
+    from siha.models import ActionTemplate, TemplateOrigin, TemplateStatus
+
+    try:
+        with get_session() as session:
+            row = session.get(ActionTemplate, template_id)
+            if not row:
+                return False
+            if success:
+                row.success_count = (row.success_count or 0) + 1
+            else:
+                row.failure_count = (row.failure_count or 0) + 1
+
+            archived = (
+                row.origin == TemplateOrigin.synthesized
+                and row.status == TemplateStatus.active
+                and row.failure_count >= settings.template_failure_archive_threshold
+                and row.failure_count > (row.success_count or 0)
+            )
+            if archived:
+                row.status = TemplateStatus.archived
+            session.commit()
+            return archived
+    except Exception:
+        return False
+
+
 class ActionMapper:
     """Deterministic mapping from user request to tool call(s).
 
@@ -228,6 +278,10 @@ class ActionMapper:
                 args_template=row.args_template or {},
                 priority=row.priority,
                 template_id=row.id,
+                # TemplateOrigin is a str-subclass enum; keep the raw value so
+                # equality against "synthesized" works across Python versions.
+                origin=(getattr(row, "origin", None) or "seed"),
+                success_count=getattr(row, "success_count", 0) or 0,
             )
             for row in rows
         ]
@@ -274,6 +328,8 @@ class ActionMapper:
                     "arguments": json.dumps(arguments),
                 },
                 "template_name": spec.name,
+                "template_id": spec.template_id,
+                "probation": spec.probation,
             })
             if spec.template_id is not None:
                 hit_ids.append(spec.template_id)

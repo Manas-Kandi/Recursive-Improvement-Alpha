@@ -4,7 +4,7 @@ import threading
 import time
 from typing import Optional
 from siha.db import get_session
-from siha.models import Task, TaskStatus, Mutation, MutationStatus
+from siha.models import Task, TaskStatus, TaskCategory, Mutation, MutationStatus
 from sqlmodel import select
 from siha.harness.analyzer import Analyzer
 from siha.harness.mutator import Mutator
@@ -59,26 +59,40 @@ class Scheduler:
                 time.sleep(10)
     
     def _analyze_completed_tasks(self):
-        """Analyze completed tasks that have not yet been analyzed."""
+        """Analyze finished tasks (successes AND failures) not yet analyzed.
+
+        Successes feed the synthesis flywheel; failures feed triage and the
+        meta-analyzer — failed traces are where the harness learns what it
+        cannot yet do. Failed benchmark/system tasks are excluded: they re-run
+        constantly and would drown the analyzer in duplicate traces.
+        """
+        from sqlalchemy import or_, and_
         from siha.portal.events import event_bus
 
         with get_session() as session:
             tasks = session.exec(select(Task).where(
-                Task.status == TaskStatus.success,
                 Task.analyzed == False,  # noqa: E712
+                or_(
+                    Task.status == TaskStatus.success,
+                    and_(
+                        Task.status == TaskStatus.failed,
+                        Task.category == TaskCategory.user,
+                    ),
+                ),
             ).order_by(Task.id).limit(10)).all()
-            task_ids = [t.id for t in tasks]
+            analyzable = [(t.id, t.status) for t in tasks]
 
-        for task_id in task_ids:
+        for task_id, task_status in analyzable:
             critique = None
             try:
-                # Deterministic distillation first: if the LLM planner solved this
-                # task, generalize it into a reusable action template.
-                synth_mutation = self.synthesizer.synthesize_from_task(task_id)
-                if synth_mutation is not None:
-                    event_bus.publish("mutation_proposed", {"mutation_id": synth_mutation.id})
-                    if not settings.require_human_approval:
-                        self.mutator.apply_mutation(synth_mutation)
+                if task_status == TaskStatus.success:
+                    # Deterministic distillation first: if the LLM planner solved
+                    # this task, generalize it into a reusable action template.
+                    synth_mutation = self.synthesizer.synthesize_from_task(task_id)
+                    if synth_mutation is not None:
+                        event_bus.publish("mutation_proposed", {"mutation_id": synth_mutation.id})
+                        if not settings.require_human_approval:
+                            self.mutator.apply_mutation(synth_mutation)
 
                 critique = self.analyzer.analyze_task(task_id)
                 for mutation_data in critique.get("proposed_mutations", []):
@@ -88,7 +102,8 @@ class Scheduler:
                     if not settings.require_human_approval:
                         self.mutator.apply_mutation(mutation)
 
-                self._maybe_generate_benchmark(task_id)
+                if task_status == TaskStatus.success:
+                    self._maybe_generate_benchmark(task_id)
             except Exception as e:
                 logger.error("Analyzer error", exc_info=True, extra={"task_id": task_id, "error": str(e)})
             finally:
@@ -96,8 +111,13 @@ class Scheduler:
                     task = session.get(Task, task_id)
                     if task:
                         task.analyzed = True
+                        if critique is not None:
+                            task.triage = critique
                         session.commit()
-                event_bus.publish("task_analyzed", {"task_id": task_id})
+                event_bus.publish("task_analyzed", {
+                    "task_id": task_id,
+                    "failure_categories": (critique or {}).get("failure_categories", []),
+                })
 
     def _maybe_generate_benchmark(self, task_id: int):
         """Generate a benchmark from a novel task category, if applicable."""

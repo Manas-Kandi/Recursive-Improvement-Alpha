@@ -129,6 +129,8 @@ All options live in `.env`:
 | `BENCHMARK_RUNS` | `3` | Repetitions per benchmark when scoring a harness version (averaged) |
 | `BENCHMARK_CACHE` | `true` | Reuse previously recorded scores for a harness version |
 | `MAX_AUTO_BENCHMARKS` | `50` | Cap on auto-generated benchmarks |
+| `TEMPLATE_PROBATION_RUNS` | `3` | Confirmed successes a synthesized template needs to leave probation |
+| `TEMPLATE_FAILURE_ARCHIVE_THRESHOLD` | `3` | Failures at which a synthesized template is auto-archived |
 
 ---
 
@@ -216,6 +218,43 @@ portal-web/               # React + Vite + Tailwind frontend
 ---
 
 ## Decision Log
+
+### 2026-06-09 — Failure-Driven Learning + Graduated Template Trust
+
+**Context:** The improvement loop only analyzed *successful* tasks, so failures
+— the strongest "the harness could improve here" signal — were never triaged
+or sent to the meta-analyzer. Separately, synthesized templates fired before
+the LLM with full trust from birth: a bad generalization would mis-fire
+silently and confidently forever. A promotion bug also left every evaluated
+mutation stuck in `evaluating` (the scheduler path could never promote).
+
+**What changed:**
+- **Failure learning:** the scheduler now analyzes failed user tasks. Triage
+  classifies recognizable failure modes deterministically; unexplained
+  failures go to the LLM analyzer, whose proposed mutations enter the normal
+  approval lifecycle. The triage critique is persisted on `Task.triage`
+  (new column) for failure analytics.
+- **Graduated trust (shadow mode):** `ActionTemplate` gains `success_count` /
+  `failure_count`. Synthesized templates start in *probation*: each match is
+  shadow-confirmed by the planner (same tool + same path/command head). After
+  `TEMPLATE_PROBATION_RUNS` confirmed successes the template is trusted and
+  runs purely deterministically. Planner disagreement counts as a mis-fire
+  and executes the planner's step instead. Templates whose failures reach
+  `TEMPLATE_FAILURE_ARCHIVE_THRESHOLD` (and outnumber successes) are
+  auto-archived — bad generalizations demote themselves. Seed templates are
+  exempt from probation and auto-archive.
+- **Promotion fix:** `Mutator.promote_mutation` accepts the transient
+  `evaluating` state set by `Evaluator.should_promote`; the scheduler retries
+  mutations orphaned mid-evaluation. (Without this no mutation could ever be
+  promoted through the background path.)
+- **Test isolation:** tests run against a throwaway DB via `SIHA_DB_PATH`
+  (new `tests/conftest.py`); previously `pytest` dropped every table in the
+  live `harness.db`, erasing all accumulated learning.
+
+**Verified live:** an unexplained historical failure produced 3 LLM-proposed
+mutations; a tool-level failure was triaged as `missing_path`; a synthesized
+template was promoted, shadow-confirmed twice, graduated out of probation,
+and then handled new requests with zero LLM involvement.
 
 ### 2026-06-09 — Learnable Template Layer, Grammar-Constrained Planning, Trustworthy Evaluation
 

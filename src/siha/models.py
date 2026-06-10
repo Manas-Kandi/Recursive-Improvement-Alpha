@@ -106,6 +106,9 @@ class Task(SQLModel, table=True):
     harness_version_id: Optional[int] = Field(default=None)
     category: TaskCategory = Field(default=TaskCategory.user)
     trace_id: Optional[str] = Field(default=None, index=True)
+    # Triage critique recorded by the improvement cycle (root cause,
+    # failure categories, proposed mutation ids) — powers failure analytics.
+    triage: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
 
     steps: List["Step"] = Relationship(back_populates="task")
     tool_calls: List["ToolCall"] = Relationship(back_populates="task")
@@ -239,4 +242,8 @@ class ActionTemplate(SQLModel, table=True):
     parent_id: Optional[int] = None
     source_task_id: Optional[int] = Field(default=None)
     hit_count: int = Field(default=0)
+    # Graduated trust: synthesized templates are on probation until they
+    # accumulate enough confirmed successes; repeated failures auto-archive.
+    success_count: int = Field(default=0)
+    failure_count: int = Field(default=0)
     created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -14,7 +14,7 @@ from siha.sandbox import create_sandbox
 from siha.portal.events import event_bus
 from siha.agent.router import IntentRouter
 from siha.agent.planner import TaskPlanner
-from siha.agent.action_mapper import ActionMapper
+from siha.agent.action_mapper import ActionMapper, record_template_result
 from siha.agent.scaffolds import expand_content
 from siha.agent.workspace_index import build_workspace_index
 
@@ -107,13 +107,40 @@ class AgentLoop:
         steps = mapper.map(user_prompt)
         source = "template"
 
+        # --- Shadow confirmation (graduated trust) ---
+        # A synthesized template still in probation gets its match
+        # double-checked by the planner. Agreement counts toward promotion
+        # out of probation; disagreement counts as a mis-fire and the
+        # planner's step is executed instead.
+        shadow_confirmed = False
+        if len(steps) == 1 and steps[0].get("probation"):
+            template_id = steps[0].get("template_id")
+            template_name = steps[0].get("template_name")
+            planned = self._plan_step(user_prompt, tools)
+            if planned and not self._steps_agree(steps[0], planned):
+                if template_id is not None:
+                    archived = record_template_result(template_id, success=False)
+                    if archived:
+                        event_bus.publish("template_archived", {
+                            "template_id": template_id, "template": template_name,
+                        })
+                _emit("template_shadow", {
+                    "template": template_name, "agreed": False,
+                })
+                event_bus.publish("template_shadow_mismatch", {
+                    "task_id": task_id, "template": template_name,
+                })
+                steps = [planned]
+                source = "planned"
+            elif planned:
+                shadow_confirmed = True
+                _emit("template_shadow", {
+                    "template": template_name, "agreed": True,
+                })
+
         if not steps:
             # Fall back to LLM planner for novel requests
-            planner = TaskPlanner(
-                provider=self.client.__class__.__name__.lower().replace("client", "") or None,
-                model=self.client.model,
-            )
-            step = planner.plan_first_step(user_prompt, tools)
+            step = self._plan_step(user_prompt, tools)
             if step:
                 steps = [step]
             source = "planned"
@@ -138,6 +165,20 @@ class AgentLoop:
             self._record_tool_call(tool_name, tool_args, tool_result, tool_duration_ms)
 
             self._update_working_memory(tool_name, tool_args, tool_result)
+
+            # Trust bookkeeping for template-sourced steps. Successes only
+            # advance probation when the planner confirmed the match (or the
+            # template is already trusted); failures always count against it.
+            template_id = step.get("template_id")
+            if source == "template" and template_id is not None:
+                if not tool_result.success:
+                    if record_template_result(template_id, success=False):
+                        event_bus.publish("template_archived", {
+                            "template_id": template_id,
+                            "template": step.get("template_name"),
+                        })
+                elif shadow_confirmed or not step.get("probation"):
+                    record_template_result(template_id, success=True)
 
             content = tool_result.output or tool_result.error or ""
             self._record_step(
@@ -340,6 +381,55 @@ class AgentLoop:
         )
 
         return self.task
+
+    def _plan_step(
+        self,
+        user_prompt: str,
+        tools: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Ask the LLM planner for the first tool call; None on any failure."""
+        try:
+            planner = TaskPlanner(
+                provider=self.client.__class__.__name__.lower().replace("client", "") or None,
+                model=self.client.model,
+            )
+            return planner.plan_first_step(user_prompt, tools)
+        except Exception:
+            return None
+
+    @classmethod
+    def _steps_agree(
+        cls,
+        template_step: Dict[str, Any],
+        planned_step: Dict[str, Any],
+    ) -> bool:
+        """Loose agreement check between a template match and a planner step.
+
+        Same tool is required. When both supply a ``path`` the paths must
+        match; when both supply a ``command`` the executable (first token)
+        must match. Free-text args like file content are not compared — the
+        planner phrases content differently on every run.
+        """
+        t_fn = template_step.get("function", {})
+        p_fn = planned_step.get("function", {})
+        if t_fn.get("name") != p_fn.get("name"):
+            return False
+
+        t_args = cls._parse_args(t_fn.get("arguments"))
+        p_args = cls._parse_args(p_fn.get("arguments"))
+
+        t_path, p_path = t_args.get("path"), p_args.get("path")
+        if t_path and p_path and t_path.strip().lstrip("./") != p_path.strip().lstrip("./"):
+            return False
+
+        t_cmd, p_cmd = t_args.get("command"), p_args.get("command")
+        if t_cmd and p_cmd:
+            t_head = (t_cmd.split() or [""])[0]
+            p_head = (p_cmd.split() or [""])[0]
+            if t_head != p_head:
+                return False
+
+        return True
 
     @staticmethod
     def _parse_args(raw: str) -> Dict[str, Any]:

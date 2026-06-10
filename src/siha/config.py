@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     benchmark_cache: bool = True
     # Upper bound on auto-generated benchmarks so the suite stays tractable.
     max_auto_benchmarks: int = 50
+    # Graduated trust for synthesized templates: a template stays in
+    # probation (planner shadow-confirms each match) until it accumulates
+    # this many confirmed successes.
+    template_probation_runs: int = 3
+    # Synthesized templates whose failures reach this count (and exceed
+    # their successes) are automatically archived.
+    template_failure_archive_threshold: int = 3
 
     # LLM parameters
     temperature: float = 0.7
