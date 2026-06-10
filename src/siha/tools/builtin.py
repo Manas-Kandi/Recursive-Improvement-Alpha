@@ -197,7 +197,7 @@ class WriteFileTool(SandboxTool):
         except ValueError as e:
             return ToolResult(success=False, output="", error=str(e), data={"path": path})
         result = self.sandbox.run(
-            f"mkdir -p $(dirname {shlex.quote(resolved_path)}) && cp __siha_write__ {shlex.quote(resolved_path)}",
+            f"mkdir -p $(dirname {shlex.quote(resolved_path)}) && mv -f __siha_write__ {shlex.quote(resolved_path)}",
             files={"__siha_write__": content},
         )
         if result.success:

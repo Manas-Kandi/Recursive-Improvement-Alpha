@@ -6,8 +6,9 @@ from pathlib import Path
 import os
 
 
-# Database path
-DB_PATH = Path(__file__).parent.parent.parent / "harness.db"
+# Database path — SIHA_DB_PATH overrides so tests (and alternate deployments)
+# never touch the live harness.db with its accumulated learning.
+DB_PATH = Path(os.environ.get("SIHA_DB_PATH") or Path(__file__).parent.parent.parent / "harness.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 

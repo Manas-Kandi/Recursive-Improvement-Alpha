@@ -110,9 +110,12 @@ class Scheduler:
 
     def _evaluate_pending_mutations(self):
         """Evaluate candidate mutations against benchmarks and promote or rollback."""
+        # ``evaluating`` is included so mutations orphaned by a crash
+        # mid-evaluation are retried instead of being stuck forever.
+        evaluable = (MutationStatus.candidate, MutationStatus.evaluating)
         with get_session() as session:
             candidate_mutations = session.exec(select(Mutation).where(
-                Mutation.status == MutationStatus.candidate,
+                Mutation.status.in_(evaluable),
             )).all()
             mutation_ids = [m.id for m in candidate_mutations]
 
@@ -120,7 +123,7 @@ class Scheduler:
             try:
                 with get_session() as session:
                     mutation = session.get(Mutation, mutation_id)
-                    if not mutation or mutation.status != MutationStatus.candidate:
+                    if not mutation or mutation.status not in evaluable:
                         continue
 
                 should_promote = self.evaluator.should_promote(mutation)

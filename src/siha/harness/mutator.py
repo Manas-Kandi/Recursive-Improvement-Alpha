@@ -91,7 +91,10 @@ class Mutator:
         """Promote a candidate mutation to active global state."""
         with get_session() as session:
             mutation = session.get(Mutation, mutation.id)
-            if not mutation or mutation.status != MutationStatus.candidate:
+            # ``evaluating`` is the transient state set by Evaluator.should_promote
+            if not mutation or mutation.status not in (
+                MutationStatus.candidate, MutationStatus.evaluating,
+            ):
                 raise ValueError("Mutation not in candidate state")
 
             if mutation.kind == MutationKind.prompt:

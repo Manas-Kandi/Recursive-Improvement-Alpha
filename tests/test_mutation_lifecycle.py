@@ -138,6 +138,32 @@ class TestPromptMutationLifecycle:
             mutation = session.get(Mutation, mutation.id)
             assert mutation.status == MutationStatus.promoted
 
+    def test_promote_from_evaluating_state(self):
+        """Evaluator.should_promote leaves mutations in ``evaluating``;
+        promotion must still succeed (regression: scheduler path raised)."""
+        with get_session() as session:
+            _seed_prompt(session, text="old system prompt")
+
+        mutator = Mutator()
+        mutation = mutator.propose_mutation({
+            "kind": "prompt",
+            "target": "system",
+            "after": {"text": "new system prompt"},
+            "rationale": "Better instructions",
+        })
+        mutator.apply_mutation(mutation)
+
+        with get_session() as session:
+            refreshed = session.get(Mutation, mutation.id)
+            refreshed.status = MutationStatus.evaluating
+            session.commit()
+
+        mutator.promote_mutation(mutation)
+
+        with get_session() as session:
+            refreshed = session.get(Mutation, mutation.id)
+            assert refreshed.status == MutationStatus.promoted
+
     def test_rollback_prompt_restores_old(self):
         with get_session() as session:
             old = _seed_prompt(session, text="old system prompt")
